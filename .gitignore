@@ -1,5 +1,4 @@
 *.deps
-*.jpg
 *.la
 *.lo
 *.log
@@ -11,8 +10,6 @@
 *.tar.xz
 *.trs
 *~
-ctags
-cscope.out
 .libs
 .dirstamp
 /aclocal.m4
@@ -26,14 +23,8 @@ cscope.out
 /config.status
 /config.sub
 /configure
-/depcomp
-/install-sh
 /libtool
-/ltmain.sh
-/logs
-/missing
 /stamp-h1
-/test-driver
 Makefile
 Makefile.in
 TAGS
