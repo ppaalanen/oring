@@ -45,7 +45,7 @@ AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 
 # Per-program dependencies
 
-PKG_CHECK_MODULES(SIMPLE_EGL_CLIENT,
+PKG_CHECK_MODULES(ORING_CAL,
                   [egl glesv2 wayland-client wayland-egl wayland-cursor])
 
 # Results

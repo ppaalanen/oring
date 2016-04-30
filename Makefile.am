@@ -7,13 +7,13 @@ bin_PROGRAMS =
 BUILT_SOURCES =
 CLEANFILES = $(BUILT_SOURCES)
 
-bin_PROGRAMS += weston-simple-egl
-weston_simple_egl_SOURCES = src/simple-egl.c
-nodist_weston_simple_egl_SOURCES =		\
+bin_PROGRAMS += oring-cal
+oring_cal_SOURCES = src/cal.c
+nodist_oring_cal_SOURCES =		\
 	protocol/xdg-shell-unstable-v5-protocol.c		\
 	protocol/xdg-shell-unstable-v5-client-protocol.h
-weston_simple_egl_CFLAGS = $(AM_CFLAGS) $(SIMPLE_EGL_CLIENT_CFLAGS)
-weston_simple_egl_LDADD = $(SIMPLE_EGL_CLIENT_LIBS) -lm
+oring_cal_CFLAGS = $(AM_CFLAGS) $(ORING_CAL_CFLAGS)
+oring_cal_LDADD = $(ORING_CAL_LIBS) -lm
 
 BUILT_SOURCES +=					\
 	protocol/presentation-time-protocol.c				\
