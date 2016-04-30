@@ -649,7 +649,7 @@ signal_int(int signum)
 static void
 usage(int error_code)
 {
-	fprintf(stderr, "Usage: simple-egl [OPTIONS]\n\n"
+	fprintf(stderr, "Usage: oring-cal [OPTIONS]\n\n"
 		"  -f\tRun in fullscreen mode\n"
 		"  -o\tCreate an opaque surface\n"
 		"  -s\tUse a 16 bpp EGL config\n"
@@ -666,6 +666,8 @@ main(int argc, char **argv)
 	struct display display = { 0 };
 	struct window  window  = { 0 };
 	int i, ret = 0;
+
+	printf(TITLE);
 
 	window.display = &display;
 	display.window = &window;
