@@ -30,10 +30,6 @@ AM_SILENT_RULES([yes])
 # Check for programs
 AC_PROG_CC
 
-# Initialize libtool
-LT_PREREQ([2.2])
-LT_INIT([disable-static])
-
 PKG_PROG_PKG_CONFIG()
 
 AC_CHECK_DECL(CLOCK_MONOTONIC,[],
