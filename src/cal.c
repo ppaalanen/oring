@@ -519,6 +519,7 @@ static void
 keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
 		       uint32_t format, int fd, uint32_t size)
 {
+	close(fd);
 }
 
 static void
