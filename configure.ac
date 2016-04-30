@@ -1,20 +1,5 @@
-m4_define([oring_major_version], [0])
-m4_define([oring_minor_version], [0])
-m4_define([oring_micro_version], [1])
-m4_define([oring_version],
-          [oring_major_version.oring_minor_version.oring_micro_version])
-
 AC_PREREQ([2.64])
-AC_INIT([oring],
-        [oring_version],
-        [],
-        [oring],
-        [])
-
-AC_SUBST([ORING_VERSION_MAJOR], [oring_major_version])
-AC_SUBST([ORING_VERSION_MINOR], [oring_minor_version])
-AC_SUBST([ORING_VERSION_MICRO], [oring_micro_version])
-AC_SUBST([ORING_VERSION], [oring_version])
+AC_INIT([oring], [0.0.1])
 
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_HEADERS([config.h])
