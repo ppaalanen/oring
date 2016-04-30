@@ -9,17 +9,13 @@ CLEANFILES = $(BUILT_SOURCES)
 
 bin_PROGRAMS += oring-cal
 oring_cal_SOURCES = src/cal.c
-nodist_oring_cal_SOURCES =		\
-	protocol/xdg-shell-unstable-v5-protocol.c		\
-	protocol/xdg-shell-unstable-v5-client-protocol.h
+nodist_oring_cal_SOURCES =
 oring_cal_CFLAGS = $(AM_CFLAGS) $(ORING_CAL_CFLAGS)
 oring_cal_LDADD = $(ORING_CAL_LIBS) -lm
 
 BUILT_SOURCES +=					\
 	protocol/presentation-time-protocol.c				\
-	protocol/presentation-time-client-protocol.h			\
-	protocol/xdg-shell-unstable-v5-protocol.c			\
-	protocol/xdg-shell-unstable-v5-client-protocol.h
+	protocol/presentation-time-client-protocol.h
 
 
 .SECONDEXPANSION:

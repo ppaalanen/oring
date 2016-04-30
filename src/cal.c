@@ -41,11 +41,12 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
-#include "xdg-shell-unstable-v5-client-protocol.h"
 #include <sys/types.h>
 #include <unistd.h>
 
 #include "platform.h"
+
+#define TITLE PACKAGE_STRING " cal"
 
 struct window;
 struct seat;
@@ -54,7 +55,7 @@ struct display {
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct wl_compositor *compositor;
-	struct xdg_shell *shell;
+	struct wl_shell *shell;
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
 	struct wl_keyboard *keyboard;
@@ -86,7 +87,7 @@ struct window {
 	uint32_t benchmark_time, frames;
 	struct wl_egl_window *native;
 	struct wl_surface *surface;
-	struct xdg_surface *xdg_surface;
+	struct wl_shell_surface *shsurf;
 	EGLSurface egl_surface;
 	struct wl_callback *callback;
 	int fullscreen, opaque, buffer_size, frame_sync;
@@ -248,22 +249,18 @@ init_gl(struct window *window)
 }
 
 static void
-handle_surface_configure(void *data, struct xdg_surface *surface,
-			 int32_t width, int32_t height,
-			 struct wl_array *states, uint32_t serial)
+handle_surface_ping(void *data, struct wl_shell_surface *shsurf,
+		    uint32_t serial)
+{
+	wl_shell_surface_pong(shsurf, serial);
+}
+
+static void
+handle_surface_configure(void *data, struct wl_shell_surface *shsurf,
+			 uint32_t edges,
+			 int32_t width, int32_t height)
 {
 	struct window *window = data;
-	uint32_t *p;
-
-	window->fullscreen = 0;
-	wl_array_for_each(p, states) {
-		uint32_t state = *p;
-		switch (state) {
-		case XDG_SURFACE_STATE_FULLSCREEN:
-			window->fullscreen = 1;
-			break;
-		}
-	}
 
 	if (width > 0 && height > 0) {
 		if (!window->fullscreen) {
@@ -276,35 +273,49 @@ handle_surface_configure(void *data, struct xdg_surface *surface,
 		window->geometry = window->window_size;
 	}
 
-	if (window->native)
-		wl_egl_window_resize(window->native,
-				     window->geometry.width,
-				     window->geometry.height, 0, 0);
-
-	xdg_surface_ack_configure(surface, serial);
+	wl_egl_window_resize(window->native,
+			     window->geometry.width,
+			     window->geometry.height, 0, 0);
 }
 
 static void
-handle_surface_delete(void *data, struct xdg_surface *xdg_surface)
+handle_surface_popup_done(void *data, struct wl_shell_surface *shsurf)
 {
-	running = 0;
+	fprintf(stderr, "UNEXPECTED: %s\n", __func__);
 }
 
-static const struct xdg_surface_listener xdg_surface_listener = {
+static const struct wl_shell_surface_listener shell_surface_listener = {
+	handle_surface_ping,
 	handle_surface_configure,
-	handle_surface_delete,
+	handle_surface_popup_done,
 };
 
 static void
-create_xdg_surface(struct window *window, struct display *display)
+create_shell_surface(struct window *window, struct display *display)
 {
-	window->xdg_surface = xdg_shell_get_xdg_surface(display->shell,
-							window->surface);
+	window->shsurf = wl_shell_get_shell_surface(display->shell,
+						    window->surface);
+	wl_shell_surface_add_listener(window->shsurf,
+				      &shell_surface_listener, window);
 
-	xdg_surface_add_listener(window->xdg_surface,
-				 &xdg_surface_listener, window);
+	wl_shell_surface_set_title(window->shsurf, TITLE);
+	wl_shell_surface_set_class(window->shsurf, PACKAGE_NAME);
+}
 
-	xdg_surface_set_title(window->xdg_surface, "simple-egl");
+static void
+shell_surface_set_state(struct window *window)
+{
+	if (window->fullscreen) {
+		wl_shell_surface_set_fullscreen(window->shsurf,
+				WL_SHELL_SURFACE_FULLSCREEN_METHOD_DEFAULT,
+				0, NULL);
+	} else {
+		window->geometry = window->window_size;
+		wl_shell_surface_set_toplevel(window->shsurf);
+		wl_egl_window_resize(window->native,
+				window->geometry.width,
+				window->geometry.height, 0, 0);
+	}
 }
 
 static void
@@ -324,12 +335,7 @@ create_surface(struct window *window)
 						   display->egl.conf,
 						   window->native, NULL);
 
-
-	if (display->shell) {
-		create_xdg_surface(window, display);
-	} else {
-		assert(0);
-	}
+	create_shell_surface(window, display);
 
 	ret = eglMakeCurrent(window->display->egl.dpy, window->egl_surface,
 			     window->egl_surface, window->display->egl.ctx);
@@ -338,11 +344,7 @@ create_surface(struct window *window)
 	if (!window->frame_sync)
 		eglSwapInterval(display->egl.dpy, 0);
 
-	if (!display->shell)
-		return;
-
-	if (window->fullscreen)
-		xdg_surface_set_fullscreen(window->xdg_surface, NULL);
+	shell_surface_set_state(window);
 }
 
 static void
@@ -356,8 +358,7 @@ destroy_surface(struct window *window)
 	eglDestroySurface(window->display->egl.dpy, window->egl_surface);
 	wl_egl_window_destroy(window->native);
 
-	if (window->xdg_surface)
-		xdg_surface_destroy(window->xdg_surface);
+	wl_shell_surface_destroy(window->shsurf);
 	wl_surface_destroy(window->surface);
 
 	if (window->callback)
@@ -495,11 +496,8 @@ pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
 {
 	struct display *display = data;
 
-	if (!display->window->xdg_surface)
-		return;
-
 	if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED)
-		xdg_surface_move(display->window->xdg_surface,
+		wl_shell_surface_move(display->window->shsurf,
 						 display->seat, serial);
 }
 
@@ -547,10 +545,8 @@ keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
 		return;
 
 	if (key == KEY_F11 && state) {
-		if (d->window->fullscreen)
-			xdg_surface_unset_fullscreen(d->window->xdg_surface);
-		else
-			xdg_surface_set_fullscreen(d->window->xdg_surface, NULL);
+		d->window->fullscreen = !d->window->fullscreen;
+		shell_surface_set_state(d->window);
 	} else if (key == KEY_ESC && state)
 		running = 0;
 }
@@ -599,22 +595,6 @@ static const struct wl_seat_listener seat_listener = {
 };
 
 static void
-xdg_shell_ping(void *data, struct xdg_shell *shell, uint32_t serial)
-{
-	xdg_shell_pong(shell, serial);
-}
-
-static const struct xdg_shell_listener xdg_shell_listener = {
-	xdg_shell_ping,
-};
-
-#define XDG_VERSION 5 /* The version of xdg-shell that we implement */
-#ifdef static_assert
-static_assert(XDG_VERSION == XDG_SHELL_VERSION_CURRENT,
-	      "Interface version doesn't match implementation version");
-#endif
-
-static void
 registry_handle_global(void *data, struct wl_registry *registry,
 		       uint32_t name, const char *interface, uint32_t version)
 {
@@ -624,11 +604,9 @@ registry_handle_global(void *data, struct wl_registry *registry,
 		d->compositor =
 			wl_registry_bind(registry, name,
 					 &wl_compositor_interface, 1);
-	} else if (strcmp(interface, "xdg_shell") == 0) {
+	} else if (strcmp(interface, wl_shell_interface.name) == 0) {
 		d->shell = wl_registry_bind(registry, name,
-					    &xdg_shell_interface, 1);
-		xdg_shell_add_listener(d->shell, &xdg_shell_listener, d);
-		xdg_shell_use_unstable_version(d->shell, XDG_VERSION);
+					    &wl_shell_interface, 1);
 	} else if (strcmp(interface, "wl_seat") == 0) {
 		d->seat = wl_registry_bind(registry, name,
 					   &wl_seat_interface, 1);
@@ -741,7 +719,7 @@ main(int argc, char **argv)
 		redraw(&window, NULL, 0);
 	}
 
-	fprintf(stderr, "simple-egl exiting\n");
+	fprintf(stderr, TITLE " exiting\n");
 
 	destroy_surface(&window);
 	fini_egl(&display);
@@ -751,7 +729,7 @@ main(int argc, char **argv)
 		wl_cursor_theme_destroy(display.cursor_theme);
 
 	if (display.shell)
-		xdg_shell_destroy(display.shell);
+		wl_shell_destroy(display.shell);
 
 	if (display.compositor)
 		wl_compositor_destroy(display.compositor);
