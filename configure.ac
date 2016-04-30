@@ -14,6 +14,7 @@ AM_SILENT_RULES([yes])
 
 # Check for programs
 AC_PROG_CC
+AC_PROG_SED
 
 PKG_PROG_PKG_CONFIG()
 
