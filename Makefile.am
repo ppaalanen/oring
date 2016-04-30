@@ -1,12 +1,10 @@
 ACLOCAL_AMFLAGS = -I m4
 
-bin_PROGRAMS =
-noinst_PROGRAMS =
-BUILT_SOURCES =
-
 AM_CFLAGS = $(GCC_CFLAGS)
 AM_CPPFLAGS = -I$(builddir)/protocol
 
+bin_PROGRAMS =
+BUILT_SOURCES =
 CLEANFILES = $(BUILT_SOURCES)
 
 bin_PROGRAMS += weston-simple-egl
@@ -22,9 +20,6 @@ BUILT_SOURCES +=					\
 	protocol/presentation-time-client-protocol.h			\
 	protocol/xdg-shell-unstable-v5-protocol.c			\
 	protocol/xdg-shell-unstable-v5-client-protocol.h
-
-# To remove when automake 1.11 support is dropped
-export abs_builddir
 
 
 .SECONDEXPANSION:
