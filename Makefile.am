@@ -8,12 +8,15 @@ BUILT_SOURCES =
 CLEANFILES = $(BUILT_SOURCES)
 
 bin_PROGRAMS += oring-cal
-oring_cal_SOURCES = src/cal.c
+oring_cal_SOURCES =							\
+	src/cal.c							\
+	src/platform.h							\
+	src/helpers.h
 nodist_oring_cal_SOURCES =
 oring_cal_CFLAGS = $(AM_CFLAGS) $(ORING_CAL_CFLAGS)
 oring_cal_LDADD = $(ORING_CAL_LIBS) -lm
 
-BUILT_SOURCES +=					\
+BUILT_SOURCES +=							\
 	protocol/presentation-time-protocol.c				\
 	protocol/presentation-time-client-protocol.h
 

@@ -1,5 +1,6 @@
 /*
  * Copyright © 2011 Benjamin Franzke
+ * Copyright © 2016 Pekka Paalanen <pq@iki.fi>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -45,6 +46,7 @@
 #include <unistd.h>
 
 #include "platform.h"
+#include "helpers.h"
 
 #define TITLE PACKAGE_STRING " cal"
 
@@ -595,38 +597,107 @@ static const struct wl_seat_listener seat_listener = {
 	seat_handle_capabilities,
 };
 
+static int
+register_wl_compositor(struct display *d, void *proxy, uint32_t name)
+{
+	assert(wl_proxy_get_version(proxy) == 1);
+	assert(!d->compositor);
+
+	d->compositor = proxy;
+
+	return 0;
+}
+
+static int
+register_wl_shell(struct display *d, void *proxy, uint32_t name)
+{
+	assert(wl_proxy_get_version(proxy) == 1);
+	assert(!d->shell);
+
+	d->shell = proxy;
+
+	return 0;
+}
+
+static int
+register_wl_seat(struct display *d, void *proxy, uint32_t name)
+{
+	assert(wl_proxy_get_version(proxy) == 1);
+	assert(!d->seat);
+
+	d->seat = proxy;
+	wl_seat_add_listener(d->seat, &seat_listener, d);
+
+	return 0;
+}
+
+static int
+register_wl_shm(struct display *d, void *proxy, uint32_t name)
+{
+	assert(wl_proxy_get_version(proxy) == 1);
+	assert(!d->shm);
+
+	d->shm = proxy;
+
+	d->cursor_theme = wl_cursor_theme_load(NULL, 32, d->shm);
+	if (!d->cursor_theme) {
+		fprintf(stderr, "unable to load default theme\n");
+		return -1;
+	}
+
+	d->default_cursor =
+		wl_cursor_theme_get_cursor(d->cursor_theme, "left_ptr");
+	if (!d->default_cursor) {
+		fprintf(stderr, "unable to load default left pointer\n");
+		// TODO: abort ?
+	}
+
+	return 0;
+}
+
+static const struct global_binder {
+	const struct wl_interface *interface;
+	int (*register_)(struct display *d, void *proxy, uint32_t name);
+	uint32_t supported_version;
+} global_binders[] = {
+	{ &wl_compositor_interface, register_wl_compositor, 1 },
+	{ &wl_shell_interface, register_wl_shell, 1 },
+	{ &wl_seat_interface, register_wl_seat, 1 },
+	{ &wl_shm_interface, register_wl_shm, 1 },
+};
+
 static void
 registry_handle_global(void *data, struct wl_registry *registry,
 		       uint32_t name, const char *interface, uint32_t version)
 {
 	struct display *d = data;
+	unsigned i;
+	void *proxy;
+	const struct global_binder *gi;
+	uint32_t bind_ver;
 
-	if (strcmp(interface, "wl_compositor") == 0) {
-		d->compositor =
-			wl_registry_bind(registry, name,
-					 &wl_compositor_interface, 1);
-	} else if (strcmp(interface, wl_shell_interface.name) == 0) {
-		d->shell = wl_registry_bind(registry, name,
-					    &wl_shell_interface, 1);
-	} else if (strcmp(interface, "wl_seat") == 0) {
-		d->seat = wl_registry_bind(registry, name,
-					   &wl_seat_interface, 1);
-		wl_seat_add_listener(d->seat, &seat_listener, d);
-	} else if (strcmp(interface, "wl_shm") == 0) {
-		d->shm = wl_registry_bind(registry, name,
-					  &wl_shm_interface, 1);
-		d->cursor_theme = wl_cursor_theme_load(NULL, 32, d->shm);
-		if (!d->cursor_theme) {
-			fprintf(stderr, "unable to load default theme\n");
-			return;
-		}
-		d->default_cursor =
-			wl_cursor_theme_get_cursor(d->cursor_theme, "left_ptr");
-		if (!d->default_cursor) {
-			fprintf(stderr, "unable to load default left pointer\n");
-			// TODO: abort ?
-		}
+	for (i = 0; i < ARRAY_LENGTH(global_binders); i++) {
+		gi = &global_binders[i];
+
+		if (strcmp(interface, gi->interface->name) != 0)
+			continue;
+
+		bind_ver = MIN(version, gi->supported_version);
+		proxy = wl_registry_bind(registry, name, gi->interface,
+					 bind_ver);
+		if (!proxy)
+			break;
+
+		if (gi->register_(d, proxy, name) < 0)
+			break;
+
+		return;
 	}
+
+	if (i == ARRAY_LENGTH(global_binders))
+		return;
+
+	fprintf(stderr, "failed to bind '%s' (name %d)\n", interface, name);
 }
 
 static void
@@ -667,7 +738,7 @@ main(int argc, char **argv)
 	struct window  window  = { 0 };
 	int i, ret = 0;
 
-	printf(TITLE);
+	printf(TITLE "\n");
 
 	window.display = &display;
 	display.window = &window;
