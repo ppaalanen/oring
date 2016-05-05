@@ -11,6 +11,9 @@ bin_PROGRAMS += oring-cal
 oring_cal_SOURCES =							\
 	src/cal.c							\
 	src/platform.h							\
+	src/zalloc.h							\
+	src/xalloc.h							\
+	src/xalloc.c							\
 	src/helpers.h
 nodist_oring_cal_SOURCES =
 oring_cal_CFLAGS = $(AM_CFLAGS) $(ORING_CAL_CFLAGS)

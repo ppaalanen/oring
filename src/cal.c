@@ -47,6 +47,7 @@
 
 #include "platform.h"
 #include "helpers.h"
+#include "xalloc.h"
 
 #define TITLE PACKAGE_STRING " cal"
 
@@ -711,6 +712,53 @@ static const struct wl_registry_listener registry_listener = {
 	registry_handle_global_remove
 };
 
+static struct display *
+display_connect(void)
+{
+	struct display *d;
+
+	d = xzalloc(sizeof(*d));
+
+	d->display = wl_display_connect(NULL);
+	if (!d->display) {
+		perror("Error connecting");
+		exit(1);
+	}
+
+	d->registry = wl_display_get_registry(d->display);
+	wl_registry_add_listener(d->registry, &registry_listener, d);
+
+	/* Get globals */
+	wl_display_roundtrip(d->display);
+
+	/* Ensure initial events for bound globals */
+	wl_display_roundtrip(d->display);
+
+	d->cursor_surface = wl_compositor_create_surface(d->compositor);
+
+	return d;
+}
+
+static void
+display_destroy(struct display *d)
+{
+	wl_surface_destroy(d->cursor_surface);
+	if (d->cursor_theme)
+		wl_cursor_theme_destroy(d->cursor_theme);
+
+	if (d->shell)
+		wl_shell_destroy(d->shell);
+
+	if (d->compositor)
+		wl_compositor_destroy(d->compositor);
+
+	wl_registry_destroy(d->registry);
+	wl_display_roundtrip(d->display);
+	wl_display_disconnect(d->display);
+
+	free(d);
+}
+
 static void
 signal_int(int signum)
 {
@@ -734,19 +782,11 @@ int
 main(int argc, char **argv)
 {
 	struct sigaction sigint;
-	struct display display = { 0 };
+	struct display *display;
 	struct window  window  = { 0 };
 	int i, ret = 0;
 
 	printf(TITLE "\n");
-
-	window.display = &display;
-	display.window = &window;
-	window.geometry.width  = 250;
-	window.geometry.height = 250;
-	window.window_size = window.geometry;
-	window.buffer_size = 32;
-	window.frame_sync = 1;
 
 	for (i = 1; i < argc; i++) {
 		if (strcmp("-f", argv[i]) == 0)
@@ -763,21 +803,20 @@ main(int argc, char **argv)
 			usage(EXIT_FAILURE);
 	}
 
-	display.display = wl_display_connect(NULL);
-	assert(display.display);
+	display = display_connect();
 
-	display.registry = wl_display_get_registry(display.display);
-	wl_registry_add_listener(display.registry,
-				 &registry_listener, &display);
+	window.display = display;
+	display->window = &window;
+	window.geometry.width  = 250;
+	window.geometry.height = 250;
+	window.window_size = window.geometry;
+	window.buffer_size = 32;
+	window.frame_sync = 1;
 
-	wl_display_roundtrip(display.display);
 
-	init_egl(&display, &window);
+	init_egl(display, &window);
 	create_surface(&window);
 	init_gl(&window);
-
-	display.cursor_surface =
-		wl_compositor_create_surface(display.compositor);
 
 	sigint.sa_handler = signal_int;
 	sigemptyset(&sigint.sa_mask);
@@ -789,28 +828,16 @@ main(int argc, char **argv)
 	 * wl_display_dispatch_pending() to handle any events that got
 	 * queued up as a side effect. */
 	while (running && ret != -1) {
-		wl_display_dispatch_pending(display.display);
+		wl_display_dispatch_pending(display->display);
 		redraw(&window, NULL, 0);
 	}
 
 	fprintf(stderr, TITLE " exiting\n");
 
 	destroy_surface(&window);
-	fini_egl(&display);
+	fini_egl(display);
 
-	wl_surface_destroy(display.cursor_surface);
-	if (display.cursor_theme)
-		wl_cursor_theme_destroy(display.cursor_theme);
-
-	if (display.shell)
-		wl_shell_destroy(display.shell);
-
-	if (display.compositor)
-		wl_compositor_destroy(display.compositor);
-
-	wl_registry_destroy(display.registry);
-	wl_display_flush(display.display);
-	wl_display_disconnect(display.display);
+	display_destroy(display);
 
 	return 0;
 }
