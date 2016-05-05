@@ -26,11 +26,11 @@
 #ifndef WESTON_ZALLOC_H
 #define WESTON_ZALLOC_H
 
+#include <stdlib.h>
+
 #ifdef  __cplusplus
 extern "C" {
 #endif
-
-#include <stdlib.h>
 
 static inline void *
 zalloc(size_t size)

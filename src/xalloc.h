@@ -26,14 +26,14 @@
 #ifndef WESTON_XALLOC_H
 #define WESTON_XALLOC_H
 
-#ifdef  __cplusplus
-extern "C" {
-#endif
-
 #include <stdlib.h>
 #include <string.h>
 
 #include "zalloc.h"
+
+#ifdef  __cplusplus
+extern "C" {
+#endif
 
 void *
 fail_on_null(void *p, size_t size, char *file, int32_t line);
