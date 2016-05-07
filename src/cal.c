@@ -54,6 +54,35 @@
 struct window;
 struct seat;
 
+struct vidmode {
+	struct wl_list link; /* struct output::mode_list */
+
+	uint32_t flags;
+	int width;
+	int height;
+	int millihz;
+};
+
+struct output {
+	struct wl_list link; /* struct display::output_list */
+
+	struct wl_output *proxy;
+	uint32_t name;
+	char *make;
+	char *model;
+	int mm_width;
+	int mm_height;
+	enum wl_output_transform transform;
+	int scale;
+
+	struct wl_list mode_list; /* struct vidmode::link */
+	struct vidmode *current;
+
+	bool done;
+
+	struct vidmode *chosen;
+};
+
 struct display {
 	struct wl_display *display;
 	struct wl_registry *registry;
@@ -72,6 +101,8 @@ struct display {
 		EGLConfig conf;
 	} egl;
 	struct window *window;
+
+	struct wl_list output_list; /* struct output::link */
 };
 
 struct geometry {
@@ -369,6 +400,24 @@ destroy_surface(struct window *window)
 }
 
 static void
+output_destroy(struct output *o)
+{
+	struct vidmode *v;
+
+	wl_list_remove(&o->link);
+	free(o->make);
+	free(o->model);
+
+	while (!wl_list_empty(&o->mode_list)) {
+		v = wl_container_of(o->mode_list.next, v, link);
+		wl_list_remove(&v->link);
+		free(v);
+	}
+
+	free(o);
+}
+
+static void
 redraw(void *data, struct wl_callback *callback, uint32_t time)
 {
 	struct window *window = data;
@@ -656,6 +705,103 @@ register_wl_shm(struct display *d, void *proxy, uint32_t name)
 	return 0;
 }
 
+static void
+output_handle_geometry(void *data,
+		       struct wl_output *output,
+		       int32_t x,
+		       int32_t y,
+		       int32_t physical_width,
+		       int32_t physical_height,
+		       int32_t subpixel,
+		       const char *make,
+		       const char *model,
+		       int32_t transform)
+{
+	struct output *o = data;
+
+	assert(o->proxy == output);
+
+	o->mm_width = physical_width;
+	o->mm_height = physical_height;
+	o->make = strdup(make);
+	o->model = strdup(model);
+	o->transform = transform;
+}
+
+static void
+output_handle_mode(void *data,
+		   struct wl_output *output,
+		   uint32_t flags,
+		   int32_t width,
+		   int32_t height,
+		   int32_t refresh)
+{
+	struct output *o = data;
+	struct vidmode *mode;
+
+	assert(o->proxy == output);
+
+	mode = xzalloc(sizeof(*mode));
+	mode->flags = flags;
+	mode->width = width;
+	mode->height = height;
+	mode->millihz = refresh;
+	wl_list_insert(o->mode_list.prev, &mode->link);
+
+	if (flags & WL_OUTPUT_MODE_CURRENT)
+		o->current = mode;
+}
+
+static void
+output_handle_done(void *data, struct wl_output *output)
+{
+	struct output *o = data;
+
+	assert(o->proxy == output);
+
+	o->done = true;
+}
+
+static void
+output_handle_scale(void *data, struct wl_output *output, int32_t factor)
+{
+	struct output *o = data;
+
+	assert(o->proxy == output);
+
+	o->scale = factor;
+}
+
+static const struct wl_output_listener output_listener = {
+	output_handle_geometry,
+	output_handle_mode,
+	output_handle_done,
+	output_handle_scale,
+};
+
+static int
+register_wl_output(struct display *d, void *proxy, uint32_t name)
+{
+	struct output *o;
+
+	if (wl_proxy_get_version(proxy) < 2) {
+		fprintf(stderr,
+			"unsupported: wl_output version is below 2\n");
+		return -1;
+	}
+
+	o = xzalloc(sizeof(*o));
+	wl_list_init(&o->mode_list);
+
+	o->proxy = proxy;
+	o->name = name;
+	wl_list_insert(d->output_list.prev, &o->link);
+
+	wl_output_add_listener(o->proxy, &output_listener, o);
+
+	return 0;
+}
+
 static const struct global_binder {
 	const struct wl_interface *interface;
 	int (*register_)(struct display *d, void *proxy, uint32_t name);
@@ -665,6 +811,7 @@ static const struct global_binder {
 	{ &wl_shell_interface, register_wl_shell, 1 },
 	{ &wl_seat_interface, register_wl_seat, 1 },
 	{ &wl_shm_interface, register_wl_shm, 1 },
+	{ &wl_output_interface, register_wl_output, 2 },
 };
 
 static void
@@ -719,6 +866,8 @@ display_connect(void)
 
 	d = xzalloc(sizeof(*d));
 
+	wl_list_init(&d->output_list);
+
 	d->display = wl_display_connect(NULL);
 	if (!d->display) {
 		perror("Error connecting");
@@ -756,7 +905,58 @@ display_destroy(struct display *d)
 	wl_display_roundtrip(d->display);
 	wl_display_disconnect(d->display);
 
+	while (!wl_list_empty(&d->output_list)) {
+		struct output *o = wl_container_of(d->output_list.next,
+						   o, link);
+
+		output_destroy(o);
+	}
+
 	free(d);
+}
+
+static const char *output_transform_string[] = {
+	[WL_OUTPUT_TRANSFORM_NORMAL] = "normal",
+	[WL_OUTPUT_TRANSFORM_90] = "90",
+	[WL_OUTPUT_TRANSFORM_180] = "180",
+	[WL_OUTPUT_TRANSFORM_270] = "270",
+	[WL_OUTPUT_TRANSFORM_FLIPPED] = "flipped",
+	[WL_OUTPUT_TRANSFORM_FLIPPED_90] = "flipped-90",
+	[WL_OUTPUT_TRANSFORM_FLIPPED_180] = "flipped-180",
+	[WL_OUTPUT_TRANSFORM_FLIPPED_270] = "flipped-270"
+};
+
+static struct output *
+display_choose_output(struct display *d)
+{
+	struct output *output;
+	int len;
+
+	len = wl_list_length(&d->output_list);
+	printf("found %d outputs:\n", len);
+	if (len == 0)
+		return NULL;
+
+	wl_list_for_each(output, &d->output_list, link) {
+		printf("\toutput-%d: ", output->name);
+		if (!output->done) {
+			printf("error getting output info\n");
+			continue;
+		}
+
+		if (output->current)
+			printf("%dx%d ", output->current->width,
+			       output->current->height);
+		else
+			printf("(no mode) ");
+
+		printf("%s, scale=%d, ",
+		       output_transform_string[output->transform],
+		       output->scale);
+		printf("%s, %s\n", output->make, output->model);
+	}
+
+	return wl_container_of(d->output_list.prev, output, link);
 }
 
 static void
@@ -784,6 +984,7 @@ main(int argc, char **argv)
 	struct sigaction sigint;
 	struct display *display;
 	struct window  window  = { 0 };
+	struct output *output;
 	int i, ret = 0;
 
 	printf(TITLE "\n");
@@ -813,6 +1014,12 @@ main(int argc, char **argv)
 	window.buffer_size = 32;
 	window.frame_sync = 1;
 
+	output = display_choose_output(display);
+	if (!output) {
+		fprintf(stderr, "Error: Could not choose output.\n");
+		exit(1);
+	}
+	printf("chose output-%d\n", output->name);
 
 	init_egl(display, &window);
 	create_surface(&window);
