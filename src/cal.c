@@ -49,10 +49,23 @@
 #include "helpers.h"
 #include "xalloc.h"
 
+#include "presentation-time-client-protocol.h"
+
 #define TITLE PACKAGE_STRING " cal"
+
+#define INVALID_CLOCK_ID 9999
 
 struct window;
 struct seat;
+
+struct submission {
+	struct wl_list link;
+	struct window *window;
+
+	struct wl_callback *frame;
+	bool frame_done;
+	struct wp_presentation_feedback *feedback;
+};
 
 struct vidmode {
 	struct wl_list link; /* struct output::mode_list */
@@ -88,13 +101,19 @@ struct display {
 	struct wl_registry *registry;
 	struct wl_compositor *compositor;
 	struct wl_shell *shell;
+
+	struct wp_presentation *presentation;
+	clockid_t clock_id;
+
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
 	struct wl_keyboard *keyboard;
+
 	struct wl_shm *shm;
 	struct wl_cursor_theme *cursor_theme;
 	struct wl_cursor *default_cursor;
 	struct wl_surface *cursor_surface;
+
 	struct {
 		EGLDisplay dpy;
 		EGLContext ctx;
@@ -125,6 +144,8 @@ struct window {
 	EGLSurface egl_surface;
 	struct wl_callback *callback;
 	int fullscreen, opaque, buffer_size, frame_sync;
+
+	struct wl_list submissions_list; /* struct submission::link */
 };
 
 static const char *vert_shader_text =
@@ -145,6 +166,138 @@ static const char *frag_shader_text =
 	"}\n";
 
 static int running = 1;
+
+static void
+destroy_submission(struct submission *subm)
+{
+	wl_list_remove(&subm->link);
+
+	if (subm->frame)
+		wl_callback_destroy(subm->frame);
+	if (subm->feedback)
+		wp_presentation_feedback_destroy(subm->feedback);
+
+	free(subm);
+}
+
+static void
+submission_finish(struct submission *subm)
+{
+	struct window *window = subm->window;
+
+	destroy_submission(subm);
+
+	printf("Trigger %p!\n", window);
+}
+
+static void
+submission_feedback_destroy(struct submission *subm,
+			    struct wp_presentation_feedback *feedback)
+{
+	assert(feedback == subm->feedback);
+
+	wp_presentation_feedback_destroy(subm->feedback);
+	subm->feedback = NULL;
+}
+
+static void
+feedback_sync_output(void *data,
+		     struct wp_presentation_feedback *feedback,
+		     struct wl_output *output)
+{
+	printf("sync-output: %p\n", output);
+}
+
+static void
+feedback_presented(void *data,
+		   struct wp_presentation_feedback *feedback,
+		   uint32_t tv_sec_hi,
+		   uint32_t tv_sec_lo,
+		   uint32_t tv_nsec,
+		   uint32_t refresh,
+		   uint32_t seq_hi,
+		   uint32_t seq_lo,
+		   uint32_t flags)
+{
+	struct submission *subm = data;
+
+	assert(subm->frame_done);
+
+	printf("presented\n");
+
+	submission_feedback_destroy(subm, feedback);
+
+	submission_finish(subm);
+}
+
+static void
+feedback_discarded(void *data, struct wp_presentation_feedback *feedback)
+{
+	struct submission *subm = data;
+
+	fprintf(stderr, "Warning: frame discarded unexpectedly.\n");
+
+	submission_feedback_destroy(subm, feedback);
+
+	submission_finish(subm);
+}
+
+static const struct wp_presentation_feedback_listener
+				presentation_feedback_listener = {
+	feedback_sync_output,
+	feedback_presented,
+	feedback_discarded,
+};
+
+static void
+frame_callback_done(void *data, struct wl_callback *cb, uint32_t arg)
+{
+	struct submission *subm = data;
+
+	assert(cb == subm->frame);
+
+	wl_callback_destroy(subm->frame);
+	subm->frame = NULL;
+	subm->frame_done = true;
+
+	if (!subm->window->display->presentation)
+		submission_finish(subm);
+
+	printf("Frame\n");
+}
+
+static const struct wl_callback_listener frame_callback_listener = {
+	frame_callback_done,
+};
+
+static int
+create_submission(struct window *window)
+{
+	struct submission *subm;
+	struct display *d = window->display;
+
+	subm = zalloc(sizeof *subm);
+	if (!subm)
+		return -1;
+
+	subm->window = window;
+
+	subm->frame = wl_surface_frame(window->surface);
+	wl_callback_add_listener(subm->frame, &frame_callback_listener, subm);
+	subm->frame_done = false;
+
+	if (d->presentation) {
+		subm->feedback = wp_presentation_feedback(d->presentation,
+							  window->surface);
+		wp_presentation_feedback_add_listener(subm->feedback,
+						&presentation_feedback_listener,
+						subm);
+	}
+
+	wl_list_insert(&window->submissions_list, &subm->link);
+
+	return 0;
+}
 
 static void
 init_egl(struct display *display, struct window *window)
@@ -358,6 +511,8 @@ create_surface(struct window *window)
 	struct display *display = window->display;
 	EGLBoolean ret;
 
+	wl_list_init(&window->submissions_list);
+
 	window->surface = wl_compositor_create_surface(display->compositor);
 
 	window->native =
@@ -384,6 +539,8 @@ create_surface(struct window *window)
 static void
 destroy_surface(struct window *window)
 {
+	struct submission *subm, *tmp;
+
 	/* Required, otherwise segfault in egl_dri2.c: dri2_make_current()
 	 * on eglReleaseThread(). */
 	eglMakeCurrent(window->display->egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
@@ -397,6 +554,9 @@ destroy_surface(struct window *window)
 
 	if (window->callback)
 		wl_callback_destroy(window->callback);
+
+	wl_list_for_each_safe(subm, tmp, &window->submissions_list, link)
+		destroy_submission(subm);
 }
 
 static void
@@ -497,6 +657,7 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 		wl_surface_set_opaque_region(window->surface, NULL);
 	}
 
+	create_submission(window);
 	eglSwapBuffers(display->egl.dpy, window->egl_surface);
 	window->frames++;
 }
@@ -802,6 +963,32 @@ register_wl_output(struct display *d, void *proxy, uint32_t name)
 	return 0;
 }
 
+static void
+presentation_clock_id(void *data, struct wp_presentation *wp_presentation,
+		      uint32_t clk_id)
+{
+	struct display *d = data;
+
+	d->clock_id = clk_id;
+}
+
+static const struct wp_presentation_listener presentation_listener = {
+	presentation_clock_id,
+};
+
+static int
+register_wp_presentation(struct display *d, void *proxy, uint32_t name)
+{
+	assert(wl_proxy_get_version(proxy) == 1);
+	assert(!d->presentation);
+
+	d->presentation = proxy;
+	wp_presentation_add_listener(d->presentation,
+				     &presentation_listener, d);
+
+	return 0;
+}
+
 static const struct global_binder {
 	const struct wl_interface *interface;
 	int (*register_)(struct display *d, void *proxy, uint32_t name);
@@ -812,6 +999,7 @@ static const struct global_binder {
 	{ &wl_seat_interface, register_wl_seat, 1 },
 	{ &wl_shm_interface, register_wl_shm, 1 },
 	{ &wl_output_interface, register_wl_output, 2 },
+	{ &wp_presentation_interface, register_wp_presentation, 1 },
 };
 
 static void
@@ -867,6 +1055,7 @@ display_connect(void)
 	d = xzalloc(sizeof(*d));
 
 	wl_list_init(&d->output_list);
+	d->clock_id = INVALID_CLOCK_ID;
 
 	d->display = wl_display_connect(NULL);
 	if (!d->display) {
@@ -884,6 +1073,17 @@ display_connect(void)
 	wl_display_roundtrip(d->display);
 
 	d->cursor_surface = wl_compositor_create_surface(d->compositor);
+
+	if (!d->presentation) {
+		fprintf(stderr, "Warning: wp_presentation unavailable, "
+			"timings will suffer.\n");
+	} else {
+		if (d->clock_id == INVALID_CLOCK_ID) {
+			fprintf(stderr,
+				"Error: wp_presentation clock not received\n");
+			exit(1);
+		}
+	}
 
 	return d;
 }
