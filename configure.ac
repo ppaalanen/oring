@@ -39,6 +39,9 @@ AC_SUBST(WAYLAND_PROTOCOLS_DATADIR, $ac_wayland_protocols_pkgdatadir)
 AC_USE_SYSTEM_EXTENSIONS
 AC_SYS_LARGEFILE
 
+# In old glibc versions (< 2.17) clock_gettime() is in librt
+WESTON_SEARCH_LIBS([CLOCK_GETTIME], [rt], [clock_gettime])
+
 AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 	      [AC_MSG_ERROR("CLOCK_MONOTONIC is needed")],
 	      [[#include <time.h>]])

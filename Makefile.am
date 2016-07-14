@@ -10,6 +10,9 @@ CLEANFILES = $(BUILT_SOURCES)
 bin_PROGRAMS += oring-cal
 oring_cal_SOURCES =							\
 	src/cal.c							\
+	src/oring-clock.c						\
+	src/oring-clock.h						\
+	src/timespec-util.h						\
 	src/platform.h							\
 	src/zalloc.h							\
 	src/xalloc.h							\
@@ -17,7 +20,7 @@ oring_cal_SOURCES =							\
 	src/helpers.h
 nodist_oring_cal_SOURCES =
 oring_cal_CFLAGS = $(AM_CFLAGS) $(ORING_CAL_CFLAGS)
-oring_cal_LDADD = $(ORING_CAL_LIBS) -lm
+oring_cal_LDADD = $(ORING_CAL_LIBS) $(CLOCK_GETTIME_LIBS) -lm
 
 BUILT_SOURCES +=							\
 	protocol/presentation-time-protocol.c				\
