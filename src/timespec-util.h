@@ -72,4 +72,19 @@ millihz_to_nsec(uint32_t mhz)
 	return 1000000000000LL / mhz;
 }
 
+/* Convert Wayland protocol values to timespec
+ *
+ * \param tm Output variable.
+ * \param tv_sec_hi See Presentation extension.
+ * \param tv_sec_lo See Presentation extension.
+ * \param tv_nsec See Presentation extension.
+ */
+static inline void
+timespec_from_proto(struct timespec *tm, uint32_t tv_sec_hi,
+		    uint32_t tv_sec_lo, uint32_t tv_nsec)
+{
+	tm->tv_sec = ((uint64_t)tv_sec_hi << 32) + tv_sec_lo;
+	tm->tv_nsec = tv_nsec;
+}
+
 #endif /* TIMESPEC_UTIL_H */

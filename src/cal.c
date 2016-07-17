@@ -50,6 +50,7 @@
 #include "helpers.h"
 #include "xalloc.h"
 #include "oring-clock.h"
+#include "timespec-util.h"
 
 #include "presentation-time-client-protocol.h"
 
@@ -223,10 +224,16 @@ feedback_presented(void *data,
 		   uint32_t flags)
 {
 	struct submission *subm = data;
+	struct display *d = subm->window->display;
+	struct timespec tm;
+	uint64_t nsec;
 
 	assert(subm->frame_done);
 
-	printf("presented\n");
+	timespec_from_proto(&tm, tv_sec_hi, tv_sec_lo, tv_nsec);
+	nsec = oring_clock_get_nsec(&d->gfx_clock, &tm);
+
+	printf("presented at %" PRIu64 "\n", nsec);
 
 	submission_feedback_destroy(subm, feedback);
 
