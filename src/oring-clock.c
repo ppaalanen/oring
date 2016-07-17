@@ -28,6 +28,7 @@
 
 #include "oring-clock.h"
 #include "timespec-util.h"
+#include "helpers.h"
 
 static int64_t
 oring_clock_delta_nsec(const struct oring_clock *oc,
@@ -190,4 +191,47 @@ oring_clock_get_nsec_now(const struct oring_clock *oc)
 	assert(ret == 0);
 
 	return oring_clock_get_nsec(oc, &now);
+}
+
+/** Get the name string for the given clock id
+ *
+ * \param clock_id ID, see clock_gettime()
+ * \return String, never NULL.
+ *
+ * The string is "unknown" if the id was not recognized.
+ */
+const char *
+clock_get_name(clockid_t clock_id)
+{
+	static const char * const names[] = {
+#define E(x) [x] = #x
+		E(CLOCK_REALTIME),
+		E(CLOCK_MONOTONIC),
+#ifdef CLOCK_REALTIME_COARSE
+		E(CLOCK_REALTIME_COARSE),
+#endif
+#ifdef CLOCK_MONOTONIC_COARSE
+		E(CLOCK_MONOTONIC_COARSE),
+#endif
+#ifdef CLOCK_MONOTONIC_RAW
+		E(CLOCK_MONOTONIC_RAW),
+#endif
+#ifdef CLOCK_BOOTTIME
+		E(CLOCK_BOOTTIME),
+#endif
+#ifdef CLOCK_PROCESS_CPUTIME_ID
+		E(CLOCK_PROCESS_CPUTIME_ID),
+#endif
+#ifdef CLOCK_THREAD_CPUTIME_ID
+		E(CLOCK_THREAD_CPUTIME_ID),
+#endif
+#undef E
+	};
+
+	unsigned idx = clock_id;
+
+	if (idx >= ARRAY_LENGTH(names) || !names[idx])
+		return "unknown";
+
+	return names[idx];
 }

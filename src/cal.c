@@ -31,6 +31,7 @@
 #include <math.h>
 #include <assert.h>
 #include <signal.h>
+#include <time.h>
 
 #include <linux/input.h>
 
@@ -48,6 +49,7 @@
 #include "platform.h"
 #include "helpers.h"
 #include "xalloc.h"
+#include "oring-clock.h"
 
 #include "presentation-time-client-protocol.h"
 
@@ -104,6 +106,7 @@ struct display {
 
 	struct wp_presentation *presentation;
 	clockid_t clock_id;
+	struct oring_clock gfx_clock;
 
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
@@ -1051,6 +1054,7 @@ static struct display *
 display_connect(void)
 {
 	struct display *d;
+	const char *clockname;
 
 	d = xzalloc(sizeof(*d));
 
@@ -1077,13 +1081,23 @@ display_connect(void)
 	if (!d->presentation) {
 		fprintf(stderr, "Warning: wp_presentation unavailable, "
 			"timings will suffer.\n");
+
+		d->clock_id = CLOCK_MONOTONIC;
+		clockname = "frame callback";
 	} else {
 		if (d->clock_id == INVALID_CLOCK_ID) {
 			fprintf(stderr,
 				"Error: wp_presentation clock not received\n");
 			exit(1);
 		}
+
+		clockname = "Presentation extension";
 	}
+
+	oring_clock_init_now(&d->gfx_clock, d->clock_id);
+
+	printf("Using %s, clock id %d (%s)\n", clockname, d->clock_id,
+	       clock_get_name(d->clock_id));
 
 	return d;
 }
@@ -1115,7 +1129,7 @@ display_destroy(struct display *d)
 	free(d);
 }
 
-static const char *output_transform_string[] = {
+static const char * const output_transform_string[] = {
 	[WL_OUTPUT_TRANSFORM_NORMAL] = "normal",
 	[WL_OUTPUT_TRANSFORM_90] = "90",
 	[WL_OUTPUT_TRANSFORM_180] = "180",

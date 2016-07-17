@@ -54,4 +54,7 @@ oring_clock_get_nsec(const struct oring_clock *oc, const struct timespec *ts);
 uint64_t
 oring_clock_get_nsec_now(const struct oring_clock *oc);
 
+const char *
+clock_get_name(clockid_t clock_id);
+
 #endif /* ORING_CLOCK_H */
