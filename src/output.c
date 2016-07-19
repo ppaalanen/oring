@@ -51,6 +51,11 @@ output_destroy(struct output *o)
 	free(o);
 }
 
+/** Increase reference count of output
+ *
+ * \param o The output.
+ * \return o
+ */
 struct output *
 output_ref(struct output *o)
 {
@@ -61,6 +66,13 @@ output_ref(struct output *o)
 	return o;
 }
 
+/** Decrease reference count of output
+ *
+ * Destroys the output if reference count drop to zero.
+ *
+ * \param o The output.
+ * \return The reference count after decrement. Zero means destroyed.
+ */
 int
 output_unref(struct output *o)
 {
@@ -151,6 +163,17 @@ static const struct wl_output_listener output_listener = {
 	output_handle_scale,
 };
 
+/** Create an output from a wl_output
+ *
+ * \param proxy The proxy for a wl_output (struct wl_output *).
+ * \param name The global name for the wl_output.
+ * \return A new output object.
+ *
+ * The wl_output must be at least version 2.
+ *
+ * Events on the wl_output will be automatically handled. The reference
+ * count is initialized to 1.
+ */
 struct output *
 output_create(void *proxy, uint32_t name)
 {
