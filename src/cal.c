@@ -51,6 +51,7 @@
 #include "xalloc.h"
 #include "oring-clock.h"
 #include "timespec-util.h"
+#include "output.h"
 
 #include "presentation-time-client-protocol.h"
 
@@ -68,36 +69,6 @@ struct submission {
 	struct wl_callback *frame;
 	bool frame_done;
 	struct wp_presentation_feedback *feedback;
-};
-
-struct vidmode {
-	struct wl_list link; /* struct output::mode_list */
-
-	uint32_t flags;
-	int width;
-	int height;
-	int millihz;
-};
-
-struct output {
-	struct wl_list link; /* struct display::output_list */
-	int refcount;
-
-	struct wl_output *proxy;
-	uint32_t name;
-	char *make;
-	char *model;
-	int mm_width;
-	int mm_height;
-	enum wl_output_transform transform;
-	int scale;
-
-	struct wl_list mode_list; /* struct vidmode::link */
-	struct vidmode *current;
-
-	bool done;
-
-	struct vidmode *chosen;
 };
 
 struct display {
@@ -171,50 +142,6 @@ static const char *frag_shader_text =
 	"}\n";
 
 static int running = 1;
-
-static void
-output_destroy(struct output *o)
-{
-	struct vidmode *v;
-
-	wl_list_remove(&o->link);
-	free(o->make);
-	free(o->model);
-
-	while (!wl_list_empty(&o->mode_list)) {
-		v = wl_container_of(o->mode_list.next, v, link);
-		wl_list_remove(&v->link);
-		free(v);
-	}
-
-	free(o);
-}
-
-static struct output *
-output_ref(struct output *o)
-{
-	assert(o->refcount > 0);
-
-	o->refcount++;
-
-	return o;
-}
-
-static int
-output_unref(struct output *o)
-{
-	assert(o->refcount > 0);
-
-	o->refcount--;
-
-	if (o->refcount == 0) {
-		output_destroy(o);
-
-		return 0;
-	}
-
-	return o->refcount;
-}
 
 static void
 destroy_submission(struct submission *subm)
@@ -903,100 +830,16 @@ register_wl_shm(struct display *d, void *proxy, uint32_t name)
 	return 0;
 }
 
-static void
-output_handle_geometry(void *data,
-		       struct wl_output *output,
-		       int32_t x,
-		       int32_t y,
-		       int32_t physical_width,
-		       int32_t physical_height,
-		       int32_t subpixel,
-		       const char *make,
-		       const char *model,
-		       int32_t transform)
-{
-	struct output *o = data;
-
-	assert(o->proxy == output);
-
-	o->mm_width = physical_width;
-	o->mm_height = physical_height;
-	o->make = strdup(make);
-	o->model = strdup(model);
-	o->transform = transform;
-}
-
-static void
-output_handle_mode(void *data,
-		   struct wl_output *output,
-		   uint32_t flags,
-		   int32_t width,
-		   int32_t height,
-		   int32_t refresh)
-{
-	struct output *o = data;
-	struct vidmode *mode;
-
-	assert(o->proxy == output);
-
-	mode = xzalloc(sizeof(*mode));
-	mode->flags = flags;
-	mode->width = width;
-	mode->height = height;
-	mode->millihz = refresh;
-	wl_list_insert(o->mode_list.prev, &mode->link);
-
-	if (flags & WL_OUTPUT_MODE_CURRENT)
-		o->current = mode;
-}
-
-static void
-output_handle_done(void *data, struct wl_output *output)
-{
-	struct output *o = data;
-
-	assert(o->proxy == output);
-
-	o->done = true;
-}
-
-static void
-output_handle_scale(void *data, struct wl_output *output, int32_t factor)
-{
-	struct output *o = data;
-
-	assert(o->proxy == output);
-
-	o->scale = factor;
-}
-
-static const struct wl_output_listener output_listener = {
-	output_handle_geometry,
-	output_handle_mode,
-	output_handle_done,
-	output_handle_scale,
-};
-
 static int
 register_wl_output(struct display *d, void *proxy, uint32_t name)
 {
 	struct output *o;
 
-	if (wl_proxy_get_version(proxy) < 2) {
-		fprintf(stderr,
-			"unsupported: wl_output version is below 2\n");
+	o = output_create(proxy, name);
+	if (!o)
 		return -1;
-	}
 
-	o = xzalloc(sizeof(*o));
-	wl_list_init(&o->mode_list);
-
-	o->proxy = proxy;
-	o->name = name;
 	wl_list_insert(d->output_list.prev, &o->link);
-	o->refcount = 1;
-
-	wl_output_add_listener(o->proxy, &output_listener, o);
 
 	return 0;
 }

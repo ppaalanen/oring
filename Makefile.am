@@ -13,6 +13,8 @@ oring_cal_SOURCES =							\
 	src/cal.c							\
 	src/oring-clock.c						\
 	src/oring-clock.h						\
+	src/output.c							\
+	src/output.h							\
 	src/timespec-util.h						\
 	src/platform.h							\
 	src/zalloc.h							\
