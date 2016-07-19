@@ -116,4 +116,7 @@ struct window_output {
 	struct wl_list link;
 };
 
+struct submission *
+submission_create(struct window *window);
+
 #endif /* ORING_CAL_H */
