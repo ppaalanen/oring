@@ -69,6 +69,8 @@ struct submission {
 	struct wl_callback *frame;
 	bool frame_done;
 	struct wp_presentation_feedback *feedback;
+
+	struct output *sync_output;
 };
 
 struct display {
@@ -154,6 +156,8 @@ destroy_submission(struct submission *subm)
 		wl_callback_destroy(subm->frame);
 	if (subm->feedback)
 		wp_presentation_feedback_destroy(subm->feedback);
+	if (subm->sync_output)
+		output_unref(subm->sync_output);
 
 	free(subm);
 }
@@ -181,9 +185,16 @@ submission_feedback_destroy(struct submission *subm,
 static void
 feedback_sync_output(void *data,
 		     struct wp_presentation_feedback *feedback,
-		     struct wl_output *output)
+		     struct wl_output *wo)
 {
-	printf("sync-output: %p\n", output);
+	struct submission *subm = data;
+	struct output *output;
+
+	if (subm->sync_output)
+		return;
+
+	output = output_from_wl_output(wo);
+	subm->sync_output = output_ref(output);
 }
 
 static void
@@ -207,7 +218,8 @@ feedback_presented(void *data,
 	timespec_from_proto(&tm, tv_sec_hi, tv_sec_lo, tv_nsec);
 	nsec = oring_clock_get_nsec(&d->gfx_clock, &tm);
 
-	printf("presented at %" PRIu64 "\n", nsec);
+	printf("presented at %.3f ms on output-%d\n", (double)nsec * 1e-6,
+	       subm->sync_output ? subm->sync_output->name : 9999);
 
 	submission_feedback_destroy(subm, feedback);
 

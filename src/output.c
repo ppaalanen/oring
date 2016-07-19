@@ -212,3 +212,26 @@ output_remove(struct output *o)
 	o->proxy = NULL;
 	output_unref(o);
 }
+
+/** Safe cast from wl_output
+ *
+ * \param wo The wl_output to cast from.
+ * \return The corresponding struct output, or NULL.
+ *
+ * This is safe to call with NULL. The returned pointer is non-NULL only
+ * if the wl_output really has a struct output associated.
+ */
+struct output *
+output_from_wl_output(struct wl_output *wo)
+{
+	const void *impl;
+
+	if (!wo)
+		return NULL;
+
+	impl = wl_proxy_get_listener((struct wl_proxy *)wo);
+	if (impl != &output_listener)
+		return NULL;
+
+	return wl_output_get_user_data(wo);
+}

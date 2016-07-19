@@ -70,4 +70,7 @@ output_ref(struct output *o);
 int
 output_unref(struct output *o);
 
+struct output *
+output_from_wl_output(struct wl_output *wo);
+
 #endif /* ORING_OUTPUT_H */
