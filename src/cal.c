@@ -282,7 +282,7 @@ create_submission(struct window *window)
 }
 
 static void
-init_egl(struct display *display, struct window *window)
+init_egl(struct display *display, bool has_alpha, int buffer_size)
 {
 	static const EGLint context_attribs[] = {
 		EGL_CONTEXT_CLIENT_VERSION, 2,
@@ -303,7 +303,7 @@ init_egl(struct display *display, struct window *window)
 	EGLConfig *configs;
 	EGLBoolean ret;
 
-	if (window->opaque || window->buffer_size == 16)
+	if (!has_alpha || buffer_size == 16)
 		config_attribs[9] = 0;
 
 	display->egl.dpy =
@@ -329,7 +329,7 @@ init_egl(struct display *display, struct window *window)
 	for (i = 0; i < n; i++) {
 		eglGetConfigAttrib(display->egl.dpy,
 				   configs[i], EGL_BUFFER_SIZE, &size);
-		if (window->buffer_size == size) {
+		if (buffer_size == size) {
 			display->egl.conf = configs[i];
 			break;
 		}
@@ -337,7 +337,7 @@ init_egl(struct display *display, struct window *window)
 	free(configs);
 	if (display->egl.conf == NULL) {
 		fprintf(stderr, "did not find config with buffer size %d\n",
-			window->buffer_size);
+			buffer_size);
 		exit(EXIT_FAILURE);
 	}
 
@@ -1129,7 +1129,7 @@ main(int argc, char **argv)
 	}
 	printf("chose output-%d\n", output->name);
 
-	init_egl(display, &window);
+	init_egl(display, !window.opaque, window.buffer_size);
 	create_surface(&window);
 	init_gl(&window);
 
