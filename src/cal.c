@@ -625,7 +625,7 @@ create_window(struct display *display, const struct geometry *size,
 }
 
 static void
-destroy_surface(struct window *window)
+window_destroy(struct window *window)
 {
 	struct submission *subm, *tmp;
 	struct window_output *wino, *winotmp;
@@ -649,6 +649,8 @@ destroy_surface(struct window *window)
 
 	wl_list_for_each_safe(wino, winotmp, &window->on_output_list, link)
 		window_output_destroy(wino);
+
+	free(window);
 }
 
 static void
@@ -1261,7 +1263,7 @@ main(int argc, char **argv)
 
 	fprintf(stderr, TITLE " exiting\n");
 
-	destroy_surface(window);
+	window_destroy(window);
 	fini_egl(display);
 
 	display_destroy(display);
