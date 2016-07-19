@@ -154,7 +154,7 @@ static const char *frag_shader_text =
 static int running = 1;
 
 static void
-destroy_submission(struct submission *subm)
+submission_destroy(struct submission *subm)
 {
 	wl_list_remove(&subm->link);
 
@@ -173,7 +173,7 @@ submission_finish(struct submission *subm)
 {
 	struct window *window = subm->window;
 
-	destroy_submission(subm);
+	submission_destroy(subm);
 
 	printf("Trigger %p!\n", window);
 }
@@ -645,7 +645,7 @@ window_destroy(struct window *window)
 		wl_callback_destroy(window->callback);
 
 	wl_list_for_each_safe(subm, tmp, &window->submissions_list, link)
-		destroy_submission(subm);
+		submission_destroy(subm);
 
 	wl_list_for_each_safe(wino, winotmp, &window->on_output_list, link)
 		window_output_destroy(wino);
