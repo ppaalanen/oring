@@ -126,6 +126,12 @@ struct window {
 	bool opaque;
 
 	struct wl_list submissions_list; /* struct submission::link */
+	struct wl_list on_output_list; /* struct window_output::link */
+};
+
+struct window_output {
+	struct output *output;
+	struct wl_list link;
 };
 
 static const char *vert_shader_text =
@@ -501,6 +507,84 @@ shell_surface_set_state(struct window *window)
 	}
 }
 
+static void
+window_output_destroy(struct window_output *wino)
+{
+	wl_list_remove(&wino->link);
+	output_unref(wino->output);
+	free(wino);
+}
+
+static struct window_output *
+window_output_create(struct output *output)
+{
+	struct window_output *wino;
+
+	wino = xzalloc(sizeof *wino);
+	wl_list_init(&wino->link);
+	wino->output = output_ref(output);
+
+	return wino;
+}
+
+static struct window_output *
+window_find_window_output(struct window *window, struct output *output)
+{
+	struct window_output *wino;
+
+	wl_list_for_each(wino, &window->on_output_list, link) {
+		if (wino->output == output)
+			return wino;
+	}
+
+	return NULL;
+}
+
+static void
+surface_handle_enter(void *data, struct wl_surface *wl_surface,
+		     struct wl_output *wo)
+{
+	struct window *window = data;
+	struct output *output;
+	struct window_output *wino;
+
+	assert(window->surface == wl_surface);
+
+	output = output_from_wl_output(wo);
+	if (!output)
+		return;
+
+	assert(window_find_window_output(window, output) == NULL);
+
+	wino = window_output_create(output);
+	wl_list_insert(&window->on_output_list, &wino->link);
+}
+
+static void
+surface_handle_leave(void *data, struct wl_surface *wl_surface,
+		     struct wl_output *wo)
+{
+	struct window *window = data;
+	struct output *output;
+	struct window_output *wino;
+
+	assert(window->surface == wl_surface);
+
+	output = output_from_wl_output(wo);
+	if (!output)
+		return;
+
+	wino = window_find_window_output(window, output);
+	assert(wino);
+
+	window_output_destroy(wino);
+}
+
+static const struct wl_surface_listener surface_listener = {
+	surface_handle_enter,
+	surface_handle_leave,
+};
+
 static struct window *
 create_window(struct display *display, const struct geometry *size,
 	      bool opaque, bool fullscreen)
@@ -517,8 +601,10 @@ create_window(struct display *display, const struct geometry *size,
 	window->fullscreen = fullscreen;
 
 	wl_list_init(&window->submissions_list);
+	wl_list_init(&window->on_output_list);
 
 	window->surface = wl_compositor_create_surface(display->compositor);
+	wl_surface_add_listener(window->surface, &surface_listener, window);
 
 	window->native = wl_egl_window_create(window->surface,
 					      size->width, size->height);
@@ -542,6 +628,7 @@ static void
 destroy_surface(struct window *window)
 {
 	struct submission *subm, *tmp;
+	struct window_output *wino, *winotmp;
 
 	/* Required, otherwise segfault in egl_dri2.c: dri2_make_current()
 	 * on eglReleaseThread(). */
@@ -559,6 +646,9 @@ destroy_surface(struct window *window)
 
 	wl_list_for_each_safe(subm, tmp, &window->submissions_list, link)
 		destroy_submission(subm);
+
+	wl_list_for_each_safe(wino, winotmp, &window->on_output_list, link)
+		window_output_destroy(wino);
 }
 
 static void
