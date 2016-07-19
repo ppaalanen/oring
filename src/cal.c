@@ -119,7 +119,9 @@ struct window {
 	struct wl_shell_surface *shsurf;
 	EGLSurface egl_surface;
 	struct wl_callback *callback;
-	int fullscreen, opaque, buffer_size, frame_sync;
+
+	bool fullscreen;
+	bool opaque;
 
 	struct wl_list submissions_list; /* struct submission::link */
 };
@@ -487,20 +489,27 @@ shell_surface_set_state(struct window *window)
 	}
 }
 
-static void
-create_surface(struct window *window)
+static struct window *
+create_window(struct display *display, const struct geometry *size,
+	      bool opaque, bool fullscreen)
 {
-	struct display *display = window->display;
+	struct window *window;
 	EGLBoolean ret;
+
+	window = xzalloc(sizeof *window);
+
+	window->display = display;
+	window->geometry = *size;
+	window->window_size = window->geometry;
+	window->opaque = opaque;
+	window->fullscreen = fullscreen;
 
 	wl_list_init(&window->submissions_list);
 
 	window->surface = wl_compositor_create_surface(display->compositor);
 
-	window->native =
-		wl_egl_window_create(window->surface,
-				     window->geometry.width,
-				     window->geometry.height);
+	window->native = wl_egl_window_create(window->surface,
+					      size->width, size->height);
 	window->egl_surface =
 		weston_platform_create_egl_surface(display->egl.dpy,
 						   display->egl.conf,
@@ -512,10 +521,9 @@ create_surface(struct window *window)
 			     window->egl_surface, window->display->egl.ctx);
 	assert(ret == EGL_TRUE);
 
-	if (!window->frame_sync)
-		eglSwapInterval(display->egl.dpy, 0);
-
 	shell_surface_set_state(window);
+
+	return window;
 }
 
 static void
@@ -1080,7 +1088,7 @@ usage(int error_code)
 		"  -f\tRun in fullscreen mode\n"
 		"  -o\tCreate an opaque surface\n"
 		"  -s\tUse a 16 bpp EGL config\n"
-		"  -b\tDon't sync to compositor redraw (eglSwapInterval 0)\n"
+		"  -b\tset eglSwapInterval to 0 (default 1)\n"
 		"  -h\tThis help text\n\n");
 
 	exit(error_code);
@@ -1091,21 +1099,26 @@ main(int argc, char **argv)
 {
 	struct sigaction sigint;
 	struct display *display;
-	struct window  window  = { 0 };
+	struct window *window;
 	struct output *output;
+	bool fullscreen = false;
+	bool opaque = false;
+	bool egl_frame_sync = true;
+	int buffer_bits = 32;
+	struct geometry winsize = { 250, 250 };
 	int i, ret = 0;
 
 	printf(TITLE "\n");
 
 	for (i = 1; i < argc; i++) {
 		if (strcmp("-f", argv[i]) == 0)
-			window.fullscreen = 1;
+			fullscreen = true;
 		else if (strcmp("-o", argv[i]) == 0)
-			window.opaque = 1;
+			opaque = true;
 		else if (strcmp("-s", argv[i]) == 0)
-			window.buffer_size = 16;
+			buffer_bits = 16;
 		else if (strcmp("-b", argv[i]) == 0)
-			window.frame_sync = 0;
+			egl_frame_sync = false;
 		else if (strcmp("-h", argv[i]) == 0)
 			usage(EXIT_SUCCESS);
 		else
@@ -1114,14 +1127,6 @@ main(int argc, char **argv)
 
 	display = display_connect();
 
-	window.display = display;
-	display->window = &window;
-	window.geometry.width  = 250;
-	window.geometry.height = 250;
-	window.window_size = window.geometry;
-	window.buffer_size = 32;
-	window.frame_sync = 1;
-
 	output = display_choose_output(display);
 	if (!output) {
 		fprintf(stderr, "Error: Could not choose output.\n");
@@ -1129,9 +1134,14 @@ main(int argc, char **argv)
 	}
 	printf("chose output-%d\n", output->name);
 
-	init_egl(display, !window.opaque, window.buffer_size);
-	create_surface(&window);
-	init_gl(&window);
+	init_egl(display, !opaque, buffer_bits);
+	if (!egl_frame_sync)
+		eglSwapInterval(display->egl.dpy, 0);
+
+	window = create_window(display, &winsize, opaque, fullscreen);
+	display->window = window;
+
+	init_gl(window);
 
 	sigint.sa_handler = signal_int;
 	sigemptyset(&sigint.sa_mask);
@@ -1144,12 +1154,12 @@ main(int argc, char **argv)
 	 * queued up as a side effect. */
 	while (running && ret != -1) {
 		wl_display_dispatch_pending(display->display);
-		redraw(&window, NULL, 0);
+		redraw(window, NULL, 0);
 	}
 
 	fprintf(stderr, TITLE " exiting\n");
 
-	destroy_surface(&window);
+	destroy_surface(window);
 	fini_egl(display);
 
 	display_destroy(display);
