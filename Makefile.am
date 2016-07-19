@@ -11,6 +11,7 @@ bin_PROGRAMS += oring-cal
 oring_cal_SOURCES =							\
 	protocol/presentation-time-protocol.c				\
 	src/cal.c							\
+	src/cal.h							\
 	src/oring-clock.c						\
 	src/oring-clock.h						\
 	src/output.c							\
