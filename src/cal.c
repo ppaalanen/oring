@@ -921,6 +921,22 @@ static void
 registry_handle_global_remove(void *data, struct wl_registry *registry,
 			      uint32_t name)
 {
+	struct display *d = data;
+	struct output *output = NULL;
+	struct output *o;
+
+	wl_list_for_each(o, &d->output_list, link) {
+		if (o->name == name) {
+			output = o;
+			break;
+		}
+	}
+
+	if (output) {
+		printf("output-%d removed by the compositor.\n",
+		       output->name);
+		output_remove(output);
+	}
 }
 
 static const struct wl_registry_listener registry_listener = {

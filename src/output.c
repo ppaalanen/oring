@@ -48,6 +48,9 @@ output_destroy(struct output *o)
 		free(v);
 	}
 
+	if (o->proxy)
+		wl_output_destroy(o->proxy);
+
 	free(o);
 }
 
@@ -172,7 +175,7 @@ static const struct wl_output_listener output_listener = {
  * The wl_output must be at least version 2.
  *
  * Events on the wl_output will be automatically handled. The reference
- * count is initialized to 1.
+ * count is initialized to 1. The ownership of the proxy is taken.
  */
 struct output *
 output_create(void *proxy, uint32_t name)
@@ -196,4 +199,16 @@ output_create(void *proxy, uint32_t name)
 	wl_output_add_listener(o->proxy, &output_listener, o);
 
 	return o;
+}
+
+/** Process wl_output global removal
+ *
+ * \param o The output that was removed from wl_registry.
+ */
+void
+output_remove(struct output *o)
+{
+	wl_output_destroy(o->proxy);
+	o->proxy = NULL;
+	output_unref(o);
 }

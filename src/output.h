@@ -61,6 +61,9 @@ struct output {
 struct output *
 output_create(void *proxy, uint32_t name);
 
+void
+output_remove(struct output *o);
+
 struct output *
 output_ref(struct output *o);
 
