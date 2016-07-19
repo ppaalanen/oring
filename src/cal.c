@@ -587,7 +587,7 @@ static const struct wl_surface_listener surface_listener = {
 };
 
 static struct window *
-create_window(struct display *display, const struct geometry *size,
+window_create(struct display *display, const struct geometry *size,
 	      bool opaque, bool fullscreen)
 {
 	struct window *window;
@@ -1243,7 +1243,7 @@ main(int argc, char **argv)
 	if (!egl_frame_sync)
 		eglSwapInterval(display->egl.dpy, 0);
 
-	window = create_window(display, &winsize, opaque, fullscreen);
+	window = window_create(display, &winsize, opaque, fullscreen);
 	display->window = window;
 
 	init_gl(window);
