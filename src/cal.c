@@ -81,6 +81,7 @@ struct vidmode {
 
 struct output {
 	struct wl_list link; /* struct display::output_list */
+	int refcount;
 
 	struct wl_output *proxy;
 	uint32_t name;
@@ -170,6 +171,50 @@ static const char *frag_shader_text =
 	"}\n";
 
 static int running = 1;
+
+static void
+output_destroy(struct output *o)
+{
+	struct vidmode *v;
+
+	wl_list_remove(&o->link);
+	free(o->make);
+	free(o->model);
+
+	while (!wl_list_empty(&o->mode_list)) {
+		v = wl_container_of(o->mode_list.next, v, link);
+		wl_list_remove(&v->link);
+		free(v);
+	}
+
+	free(o);
+}
+
+static struct output *
+output_ref(struct output *o)
+{
+	assert(o->refcount > 0);
+
+	o->refcount++;
+
+	return o;
+}
+
+static int
+output_unref(struct output *o)
+{
+	assert(o->refcount > 0);
+
+	o->refcount--;
+
+	if (o->refcount == 0) {
+		output_destroy(o);
+
+		return 0;
+	}
+
+	return o->refcount;
+}
 
 static void
 destroy_submission(struct submission *subm)
@@ -570,24 +615,6 @@ destroy_surface(struct window *window)
 }
 
 static void
-output_destroy(struct output *o)
-{
-	struct vidmode *v;
-
-	wl_list_remove(&o->link);
-	free(o->make);
-	free(o->model);
-
-	while (!wl_list_empty(&o->mode_list)) {
-		v = wl_container_of(o->mode_list.next, v, link);
-		wl_list_remove(&v->link);
-		free(v);
-	}
-
-	free(o);
-}
-
-static void
 redraw(void *data, struct wl_callback *callback, uint32_t time)
 {
 	struct window *window = data;
@@ -967,6 +994,7 @@ register_wl_output(struct display *d, void *proxy, uint32_t name)
 	o->proxy = proxy;
 	o->name = name;
 	wl_list_insert(d->output_list.prev, &o->link);
+	o->refcount = 1;
 
 	wl_output_add_listener(o->proxy, &output_listener, o);
 
@@ -1112,6 +1140,8 @@ display_connect(void)
 static void
 display_destroy(struct display *d)
 {
+	struct output *o, *otmp;
+
 	wl_surface_destroy(d->cursor_surface);
 	if (d->cursor_theme)
 		wl_cursor_theme_destroy(d->cursor_theme);
@@ -1126,11 +1156,9 @@ display_destroy(struct display *d)
 	wl_display_roundtrip(d->display);
 	wl_display_disconnect(d->display);
 
-	while (!wl_list_empty(&d->output_list)) {
-		struct output *o = wl_container_of(d->output_list.next,
-						   o, link);
-
-		output_destroy(o);
+	wl_list_for_each_safe(o, otmp, &d->output_list, link) {
+		if (output_unref(o) != 0)
+			fprintf(stderr, "Warning: output leaked.\n");
 	}
 
 	free(d);
