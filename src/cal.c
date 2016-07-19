@@ -273,16 +273,13 @@ static const struct wl_callback_listener frame_callback_listener = {
 	frame_callback_handle_done,
 };
 
-static int
-create_submission(struct window *window)
+static struct submission *
+submission_create(struct window *window)
 {
 	struct submission *subm;
 	struct display *d = window->display;
 
-	subm = zalloc(sizeof *subm);
-	if (!subm)
-		return -1;
-
+	subm = xzalloc(sizeof *subm);
 	subm->window = window;
 
 	subm->frame = wl_surface_frame(window->surface);
@@ -299,7 +296,7 @@ create_submission(struct window *window)
 
 	wl_list_insert(&window->submissions_list, &subm->link);
 
-	return 0;
+	return subm;
 }
 
 static void
@@ -734,7 +731,7 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 		wl_surface_set_opaque_region(window->surface, NULL);
 	}
 
-	create_submission(window);
+	submission_create(window);
 	eglSwapBuffers(display->egl.dpy, window->egl_surface);
 	window->frames++;
 }
