@@ -189,9 +189,9 @@ submission_feedback_destroy(struct submission *subm,
 }
 
 static void
-feedback_sync_output(void *data,
-		     struct wp_presentation_feedback *feedback,
-		     struct wl_output *wo)
+feedback_handle_sync_output(void *data,
+			    struct wp_presentation_feedback *feedback,
+			    struct wl_output *wo)
 {
 	struct submission *subm = data;
 	struct output *output;
@@ -204,15 +204,15 @@ feedback_sync_output(void *data,
 }
 
 static void
-feedback_presented(void *data,
-		   struct wp_presentation_feedback *feedback,
-		   uint32_t tv_sec_hi,
-		   uint32_t tv_sec_lo,
-		   uint32_t tv_nsec,
-		   uint32_t refresh,
-		   uint32_t seq_hi,
-		   uint32_t seq_lo,
-		   uint32_t flags)
+feedback_handle_presented(void *data,
+			  struct wp_presentation_feedback *feedback,
+			  uint32_t tv_sec_hi,
+			  uint32_t tv_sec_lo,
+			  uint32_t tv_nsec,
+			  uint32_t refresh,
+			  uint32_t seq_hi,
+			  uint32_t seq_lo,
+			  uint32_t flags)
 {
 	struct submission *subm = data;
 	struct display *d = subm->window->display;
@@ -233,7 +233,8 @@ feedback_presented(void *data,
 }
 
 static void
-feedback_discarded(void *data, struct wp_presentation_feedback *feedback)
+feedback_handle_discarded(void *data,
+			  struct wp_presentation_feedback *feedback)
 {
 	struct submission *subm = data;
 
@@ -246,13 +247,13 @@ feedback_discarded(void *data, struct wp_presentation_feedback *feedback)
 
 static const struct wp_presentation_feedback_listener
 				presentation_feedback_listener = {
-	feedback_sync_output,
-	feedback_presented,
-	feedback_discarded,
+	feedback_handle_sync_output,
+	feedback_handle_presented,
+	feedback_handle_discarded,
 };
 
 static void
-frame_callback_done(void *data, struct wl_callback *cb, uint32_t arg)
+frame_callback_handle_done(void *data, struct wl_callback *cb, uint32_t arg)
 {
 	struct submission *subm = data;
 
@@ -269,7 +270,7 @@ frame_callback_done(void *data, struct wl_callback *cb, uint32_t arg)
 }
 
 static const struct wl_callback_listener frame_callback_listener = {
-	frame_callback_done,
+	frame_callback_handle_done,
 };
 
 static int
