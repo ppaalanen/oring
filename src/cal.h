@@ -43,6 +43,8 @@
 
 struct window;
 struct seat;
+struct renderer_display;
+struct renderer_window;
 
 struct submission {
 	struct wl_list link;
@@ -64,17 +66,13 @@ struct display {
 	struct wp_presentation *presentation;
 	clockid_t clock_id;
 	struct oring_clock gfx_clock;
+	struct renderer_display *render_display;
 
 	struct wl_shm *shm;
 	struct wl_cursor_theme *cursor_theme;
 	struct wl_cursor *default_cursor;
 	struct wl_surface *cursor_surface;
 
-	struct {
-		EGLDisplay dpy;
-		EGLContext ctx;
-		EGLConfig conf;
-	} egl;
 	struct window *window;
 
 	struct wl_list output_list; /* struct output::link */
@@ -88,6 +86,9 @@ struct geometry {
 struct window {
 	struct display *display;
 	struct geometry geometry, window_size;
+
+	struct renderer_window *render_window;
+
 	struct {
 		GLuint rotation_uniform;
 		GLuint pos;
@@ -95,10 +96,8 @@ struct window {
 	} gl;
 
 	uint32_t benchmark_time, frames;
-	struct wl_egl_window *native;
 	struct wl_surface *surface;
 	struct wl_shell_surface *shsurf;
-	EGLSurface egl_surface;
 	struct wl_callback *callback;
 
 	bool fullscreen;

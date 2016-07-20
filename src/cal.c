@@ -34,12 +34,7 @@
 #include <time.h>
 
 #include <wayland-client.h>
-#include <wayland-egl.h>
 #include <wayland-cursor.h>
-
-#include <GLES2/gl2.h>
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -231,9 +226,9 @@ handle_surface_configure(void *data, struct wl_shell_surface *shsurf,
 		window->geometry = window->window_size;
 	}
 
-	wl_egl_window_resize(window->native,
-			     window->geometry.width,
-			     window->geometry.height, 0, 0);
+	renderer_window_resize(window->render_window,
+			       window->geometry.width,
+			       window->geometry.height);
 }
 
 static void
@@ -270,9 +265,9 @@ shell_surface_set_state(struct window *window)
 	} else {
 		window->geometry = window->window_size;
 		wl_shell_surface_set_toplevel(window->shsurf);
-		wl_egl_window_resize(window->native,
+		renderer_window_resize(window->render_window,
 				window->geometry.width,
-				window->geometry.height, 0, 0);
+				window->geometry.height);
 	}
 }
 
@@ -359,7 +354,6 @@ window_create(struct display *display, const struct geometry *size,
 	      bool opaque, bool fullscreen)
 {
 	struct window *window;
-	EGLBoolean ret;
 
 	window = xzalloc(sizeof *window);
 
@@ -375,20 +369,7 @@ window_create(struct display *display, const struct geometry *size,
 	window->surface = wl_compositor_create_surface(display->compositor);
 	wl_surface_add_listener(window->surface, &surface_listener, window);
 
-	window->native = wl_egl_window_create(window->surface,
-					      size->width, size->height);
-	window->egl_surface =
-		weston_platform_create_egl_surface(display->egl.dpy,
-						   display->egl.conf,
-						   window->native, NULL);
-
 	create_shell_surface(window, display);
-
-	ret = eglMakeCurrent(window->display->egl.dpy, window->egl_surface,
-			     window->egl_surface, window->display->egl.ctx);
-	assert(ret == EGL_TRUE);
-
-	shell_surface_set_state(window);
 
 	return window;
 }
@@ -421,14 +402,6 @@ window_destroy(struct window *window)
 {
 	struct submission *subm, *tmp;
 	struct window_output *wino, *winotmp;
-
-	/* Required, otherwise segfault in egl_dri2.c: dri2_make_current()
-	 * on eglReleaseThread(). */
-	eglMakeCurrent(window->display->egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE,
-		       EGL_NO_CONTEXT);
-
-	eglDestroySurface(window->display->egl.dpy, window->egl_surface);
-	wl_egl_window_destroy(window->native);
 
 	wl_shell_surface_destroy(window->shsurf);
 	wl_surface_destroy(window->surface);
@@ -794,7 +767,7 @@ main(int argc, char **argv)
 	struct output *output;
 	bool fullscreen = false;
 	bool opaque = false;
-	bool egl_frame_sync = true;
+	int swapinterval = 1;
 	int buffer_bits = 32;
 	struct geometry winsize = { 250, 250 };
 	int i, ret = 0;
@@ -809,7 +782,7 @@ main(int argc, char **argv)
 		else if (strcmp("-s", argv[i]) == 0)
 			buffer_bits = 16;
 		else if (strcmp("-b", argv[i]) == 0)
-			egl_frame_sync = false;
+			swapinterval = 0;
 		else if (strcmp("-h", argv[i]) == 0)
 			usage(EXIT_SUCCESS);
 		else
@@ -817,6 +790,8 @@ main(int argc, char **argv)
 	}
 
 	display = display_connect();
+	display->render_display = renderer_display_create(display->display,
+							  swapinterval);
 
 	output = display_choose_output(display);
 	if (!output) {
@@ -825,12 +800,18 @@ main(int argc, char **argv)
 	}
 	printf("chose output-%d\n", output->name);
 
-	init_egl(display, !opaque, buffer_bits);
-	if (!egl_frame_sync)
-		eglSwapInterval(display->egl.dpy, 0);
-
 	window = window_create(display, &winsize, opaque, fullscreen);
 	display->window = window;
+
+	window->render_window =
+		renderer_window_create(display->render_display,
+				       window->surface,
+				       winsize.width,
+				       winsize.height,
+				       !opaque,
+				       buffer_bits);
+
+	shell_surface_set_state(window);
 
 	init_gl(window);
 
@@ -850,9 +831,10 @@ main(int argc, char **argv)
 
 	fprintf(stderr, TITLE " exiting\n");
 
+	renderer_window_destroy(window->render_window);
 	window_destroy(window);
-	fini_egl(display);
 
+	renderer_display_destroy(display->render_display);
 	display_destroy(display);
 
 	return 0;

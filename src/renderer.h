@@ -26,11 +26,25 @@
 
 #include "cal.h"
 
-void
-init_egl(struct display *display, bool has_alpha, int buffer_size);
+struct renderer_display *
+renderer_display_create(struct wl_display *wdisp, int swapinterval);
 
 void
-fini_egl(struct display *display);
+renderer_display_destroy(struct renderer_display *rd);
+
+struct renderer_window *
+renderer_window_create(struct renderer_display *rd,
+		       struct wl_surface *wsurf,
+		       int width,
+		       int height,
+		       bool has_alpha,
+		       int buffer_bits);
+
+void
+renderer_window_resize(struct renderer_window *rw, int width, int height);
+
+void
+renderer_window_destroy(struct renderer_window *rw);
 
 void
 init_gl(struct window *window);

@@ -36,6 +36,81 @@
 #include "cal.h"
 #include "platform.h"
 #include "renderer.h"
+#include "xalloc.h"
+
+struct renderer_display {
+	EGLDisplay dpy;
+	EGLint egl_major;
+	EGLint egl_minor;
+
+	EGLint n_configs;
+};
+
+struct renderer_window {
+	struct renderer_display *render_display;
+
+	EGLContext ctx;
+	EGLConfig conf;
+
+	struct wl_egl_window *native;
+	EGLSurface egl_surface;
+};
+
+struct renderer_display *
+renderer_display_create(struct wl_display *wdisp, int swapinterval)
+{
+	struct renderer_display *rd;
+	EGLBoolean ret;
+
+	rd = xzalloc(sizeof *rd);
+
+	rd->dpy = weston_platform_get_egl_display(EGL_PLATFORM_WAYLAND_KHR,
+						  wdisp, NULL);
+	if (!rd->dpy) {
+		fprintf(stderr, "Error: getting EGLDisplay failed.\n");
+		exit(1);
+	}
+
+	ret = eglInitialize(rd->dpy, &rd->egl_major, &rd->egl_minor);
+	if (ret != EGL_TRUE) {
+		fprintf(stderr, "Error: initializing EGL failed.\n");
+		exit(1);
+	}
+
+	ret = eglBindAPI(EGL_OPENGL_ES_API);
+	if (ret != EGL_TRUE) {
+		fprintf(stderr, "Error: binding GL ES API failed.\n");
+		exit(1);
+	}
+
+	ret = eglGetConfigs(rd->dpy, NULL, 0, &rd->n_configs);
+	if (ret != EGL_TRUE || rd->n_configs < 1) {
+		fprintf(stderr, "Error: getting count of EGLConfigs failed.\n");
+		exit(1);
+	}
+
+	ret = eglSwapInterval(rd->dpy, swapinterval);
+	if (ret != EGL_TRUE) {
+		fprintf(stderr,
+			"Error: setting EGL swap interval to %d failed.\n",
+			swapinterval);
+		/* XXX: exit(1); */
+	}
+
+	printf("Initialized EGL %d.%d on Wayland platform with GL ES, "
+	       "swap interval %d.\n",
+	       rd->egl_major, rd->egl_minor, swapinterval);
+
+	return rd;
+}
+
+void
+renderer_display_destroy(struct renderer_display *rd)
+{
+	eglTerminate(rd->dpy);
+	eglReleaseThread();
+	free(rd);
+}
 
 static const char *vert_shader_text =
 	"uniform mat4 rotation;\n"
@@ -54,8 +129,44 @@ static const char *frag_shader_text =
 	"  gl_FragColor = v_color;\n"
 	"}\n";
 
-void
-init_egl(struct display *display, bool has_alpha, int buffer_size)
+static EGLConfig
+egl_choose_config(struct renderer_display *rd,
+		  const EGLint *config_attribs, int buffer_bits)
+{
+	EGLint n, i, size;
+	EGLConfig *configs;
+	EGLBoolean ret;
+	EGLConfig chosen = 0;
+
+	configs = calloc(rd->n_configs, sizeof *configs);
+	assert(configs);
+
+	ret = eglChooseConfig(rd->dpy, config_attribs,
+			      configs, rd->n_configs, &n);
+	if (!ret || n < 1) {
+		fprintf(stderr, "Error: failed to find any EGLConfigs\n");
+		exit(1);
+	}
+
+	for (i = 0; i < n; i++) {
+		eglGetConfigAttrib(rd->dpy, configs[i], EGL_BUFFER_SIZE, &size);
+		if (buffer_bits == size) {
+			chosen = configs[i];
+			break;
+		}
+	}
+	free(configs);
+
+	return chosen;
+}
+
+struct renderer_window *
+renderer_window_create(struct renderer_display *rd,
+		       struct wl_surface *wsurf,
+		       int width,
+		       int height,
+		       bool has_alpha,
+		       int buffer_bits)
 {
 	static const EGLint context_attribs[] = {
 		EGL_CONTEXT_CLIENT_VERSION, 2,
@@ -72,59 +183,61 @@ init_egl(struct display *display, bool has_alpha, int buffer_size)
 		EGL_NONE
 	};
 
-	EGLint major, minor, n, count, i, size;
-	EGLConfig *configs;
 	EGLBoolean ret;
+	struct renderer_window *rw;
 
-	if (!has_alpha || buffer_size == 16)
+	rw = xzalloc(sizeof *rw);
+	rw->render_display = rd;
+
+	if (!has_alpha || buffer_bits == 16)
 		config_attribs[9] = 0;
 
-	display->egl.dpy =
-		weston_platform_get_egl_display(EGL_PLATFORM_WAYLAND_KHR,
-						display->display, NULL);
-	assert(display->egl.dpy);
-
-	ret = eglInitialize(display->egl.dpy, &major, &minor);
-	assert(ret == EGL_TRUE);
-	ret = eglBindAPI(EGL_OPENGL_ES_API);
-	assert(ret == EGL_TRUE);
-
-	if (!eglGetConfigs(display->egl.dpy, NULL, 0, &count) || count < 1)
-		assert(0);
-
-	configs = calloc(count, sizeof *configs);
-	assert(configs);
-
-	ret = eglChooseConfig(display->egl.dpy, config_attribs,
-			      configs, count, &n);
-	assert(ret && n >= 1);
-
-	for (i = 0; i < n; i++) {
-		eglGetConfigAttrib(display->egl.dpy,
-				   configs[i], EGL_BUFFER_SIZE, &size);
-		if (buffer_size == size) {
-			display->egl.conf = configs[i];
-			break;
-		}
-	}
-	free(configs);
-	if (display->egl.conf == NULL) {
-		fprintf(stderr, "did not find config with buffer size %d\n",
-			buffer_size);
-		exit(EXIT_FAILURE);
+	rw->conf = egl_choose_config(rd, config_attribs, buffer_bits);
+	if (rw->conf == NULL) {
+		fprintf(stderr, "Error: did not find EGLConfig with buffer size %d\n",
+			buffer_bits);
+		exit(1);
 	}
 
-	display->egl.ctx = eglCreateContext(display->egl.dpy,
-					    display->egl.conf,
-					    EGL_NO_CONTEXT, context_attribs);
-	assert(display->egl.ctx);
+	rw->ctx = eglCreateContext(rd->dpy, rw->conf,
+				   EGL_NO_CONTEXT, context_attribs);
+	if (!rw->ctx) {
+		fprintf(stderr, "Error: failed to create an EGL context.\n");
+		exit(1);
+	}
+
+	rw->native = wl_egl_window_create(wsurf, width, height);
+	rw->egl_surface = weston_platform_create_egl_surface(rd->dpy,
+							     rw->conf,
+							     rw->native,
+							     NULL);
+
+	ret = eglMakeCurrent(rd->dpy, rw->egl_surface, rw->egl_surface, rw->ctx);
+	assert(ret == EGL_TRUE);
+
+	return rw;
 }
 
 void
-fini_egl(struct display *display)
+renderer_window_destroy(struct renderer_window *rw)
 {
-	eglTerminate(display->egl.dpy);
-	eglReleaseThread();
+	EGLDisplay dpy = rw->render_display->dpy;
+
+	/* Required, otherwise segfault in egl_dri2.c: dri2_make_current()
+	 * on eglReleaseThread(). */
+	eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	eglDestroyContext(dpy, rw->ctx);
+
+	eglDestroySurface(dpy, rw->egl_surface);
+	wl_egl_window_destroy(rw->native);
+
+	free(rw);
+}
+
+void
+renderer_window_resize(struct renderer_window *rw, int width, int height)
+{
+	wl_egl_window_resize(rw->native, width, height, 0, 0);
 }
 
 static GLuint
@@ -194,7 +307,7 @@ void
 redraw(void *data, struct wl_callback *callback, uint32_t time)
 {
 	struct window *window = data;
-	struct display *display = window->display;
+	struct renderer_window *rw = window->render_window;
 	static const GLfloat verts[3][2] = {
 		{ -0.5, -0.5 },
 		{  0.5, -0.5 },
@@ -271,6 +384,6 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 	}
 
 	submission_create(window);
-	eglSwapBuffers(display->egl.dpy, window->egl_surface);
+	eglSwapBuffers(rw->render_display->dpy, rw->egl_surface);
 	window->frames++;
 }
