@@ -65,10 +65,6 @@ struct display {
 	clockid_t clock_id;
 	struct oring_clock gfx_clock;
 
-	struct wl_seat *seat;
-	struct wl_pointer *pointer;
-	struct wl_keyboard *keyboard;
-
 	struct wl_shm *shm;
 	struct wl_cursor_theme *cursor_theme;
 	struct wl_cursor *default_cursor;
@@ -82,6 +78,7 @@ struct display {
 	struct window *window;
 
 	struct wl_list output_list; /* struct output::link */
+	struct wl_list seat_list; /* struct seat::link */
 };
 
 struct geometry {

@@ -26,20 +26,26 @@
 
 #include "cal.h"
 #include "input.h"
+#include "xalloc.h"
 
+#include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include <linux/input.h>
 #include <wayland-client.h>
 #include <wayland-cursor.h>
+
+/* XXX: implement support for wl_seat up to version 5 */
 
 static void
 pointer_handle_enter(void *data, struct wl_pointer *pointer,
 		     uint32_t serial, struct wl_surface *surface,
 		     wl_fixed_t sx, wl_fixed_t sy)
 {
-	struct display *display = data;
+	struct seat *s = data;
+	struct display *display = s->display;
 	struct wl_buffer *buffer;
 	struct wl_cursor *cursor = display->default_cursor;
 	struct wl_cursor_image *image;
@@ -79,11 +85,11 @@ pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
 		      uint32_t serial, uint32_t time, uint32_t button,
 		      uint32_t state)
 {
-	struct display *display = data;
+	struct seat *s = data;
+	struct display *d = s->display;
 
 	if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED)
-		wl_shell_surface_move(display->window->shsurf,
-						 display->seat, serial);
+		wl_shell_surface_move(d->window->shsurf, s->seat, serial);
 }
 
 static void
@@ -125,7 +131,8 @@ keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
 		    uint32_t serial, uint32_t time, uint32_t key,
 		    uint32_t state)
 {
-	struct display *d = data;
+	struct seat *s = data;
+	struct display *d = s->display;
 
 	if (!d->shell)
 		return;
@@ -157,22 +164,24 @@ static void
 seat_handle_capabilities(void *data, struct wl_seat *seat,
 			 enum wl_seat_capability caps)
 {
-	struct display *d = data;
+	struct seat *s = data;
 
-	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->pointer) {
-		d->pointer = wl_seat_get_pointer(seat);
-		wl_pointer_add_listener(d->pointer, &pointer_listener, d);
-	} else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->pointer) {
-		wl_pointer_destroy(d->pointer);
-		d->pointer = NULL;
+	assert(s->seat == seat);
+
+	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !s->pointer) {
+		s->pointer = wl_seat_get_pointer(seat);
+		wl_pointer_add_listener(s->pointer, &pointer_listener, s);
+	} else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && s->pointer) {
+		wl_pointer_destroy(s->pointer);
+		s->pointer = NULL;
 	}
 
-	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->keyboard) {
-		d->keyboard = wl_seat_get_keyboard(seat);
-		wl_keyboard_add_listener(d->keyboard, &keyboard_listener, d);
-	} else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->keyboard) {
-		wl_keyboard_destroy(d->keyboard);
-		d->keyboard = NULL;
+	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !s->keyboard) {
+		s->keyboard = wl_seat_get_keyboard(seat);
+		wl_keyboard_add_listener(s->keyboard, &keyboard_listener, s);
+	} else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && s->keyboard) {
+		wl_keyboard_destroy(s->keyboard);
+		s->keyboard = NULL;
 	}
 }
 
@@ -180,10 +189,33 @@ static const struct wl_seat_listener seat_listener = {
 	seat_handle_capabilities,
 };
 
-struct wl_seat *
-seat_register(struct display *display, struct wl_seat *seat)
+struct seat *
+seat_create(struct display *display, struct wl_seat *proxy, uint32_t name)
 {
-	wl_seat_add_listener(seat, &seat_listener, display);
+	struct seat *seat;
+
+	seat = xzalloc(sizeof *seat);
+	seat->display = display;
+	wl_list_init(&seat->link);
+	seat->seat = proxy;
+	seat->global_name = name;
+
+	wl_seat_add_listener(seat->seat, &seat_listener, seat);
 
 	return seat;
+}
+
+void
+seat_destroy(struct seat *seat)
+{
+	wl_list_remove(&seat->link);
+
+	if (seat->pointer)
+		wl_pointer_destroy(seat->pointer);
+
+	if (seat->keyboard)
+		wl_keyboard_destroy(seat->keyboard);
+
+	wl_seat_destroy(seat->seat);
+	free(seat);
 }

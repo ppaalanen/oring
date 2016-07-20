@@ -24,9 +24,24 @@
 #ifndef ORING_INPUT_H
 #define ORING_INPUT_H
 
-#include "cal.h"
+#include <wayland-client.h>
 
-struct wl_seat *
-seat_register(struct display *display, struct wl_seat *seat);
+struct display;
+
+struct seat {
+	struct display *display;
+	struct wl_list link;
+
+	struct wl_seat *seat;
+	uint32_t global_name;
+	struct wl_pointer *pointer;
+	struct wl_keyboard *keyboard;
+};
+
+struct seat *
+seat_create(struct display *display, struct wl_seat *proxy, uint32_t name);
+
+void
+seat_destroy(struct seat *seat);
 
 #endif /* ORING_INPUT_H */

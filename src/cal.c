@@ -447,16 +447,13 @@ register_wl_shell(struct display *d, void *proxy, uint32_t name)
 static int
 register_wl_seat(struct display *d, void *proxy, uint32_t name)
 {
+	struct seat *seat;
+
+	/* XXX: implement support for wl_seat up to version 5 */
 	assert(wl_proxy_get_version(proxy) == 1);
 
-	if (d->seat) {
-		fprintf(stderr, "Unimplemented: support for multiple wl_seats.\n");
-		wl_seat_destroy((struct wl_seat *)proxy);
-
-		return 0;
-	}
-
-	d->seat = seat_register(d, proxy);
+	seat = seat_create(d, proxy, name);
+	wl_list_insert(&d->seat_list, &seat->link);
 
 	return 0;
 }
@@ -579,6 +576,8 @@ registry_handle_global_remove(void *data, struct wl_registry *registry,
 	struct display *d = data;
 	struct output *output = NULL;
 	struct output *o;
+	struct seat *seat = NULL;
+	struct seat *s;
 
 	wl_list_for_each(o, &d->output_list, link) {
 		if (o->name == name) {
@@ -591,6 +590,23 @@ registry_handle_global_remove(void *data, struct wl_registry *registry,
 		printf("output-%d removed by the compositor.\n",
 		       output->name);
 		output_remove(output);
+
+		return;
+	}
+
+	wl_list_for_each(s, &d->seat_list, link) {
+		if (s->global_name == name) {
+			seat = s;
+			break;
+		}
+	}
+
+	if (seat) {
+		printf("seat-%d removed by the compositor.\n",
+		       seat->global_name);
+		seat_destroy(seat);
+
+		return;
 	}
 }
 
@@ -608,6 +624,7 @@ display_connect(void)
 	d = xzalloc(sizeof(*d));
 
 	wl_list_init(&d->output_list);
+	wl_list_init(&d->seat_list);
 	d->clock_id = INVALID_CLOCK_ID;
 
 	d->display = wl_display_connect(NULL);
@@ -655,6 +672,7 @@ static void
 display_destroy(struct display *d)
 {
 	struct output *o, *otmp;
+	struct seat *s, *stmp;
 
 	wl_surface_destroy(d->cursor_surface);
 	if (d->cursor_theme)
@@ -667,6 +685,10 @@ display_destroy(struct display *d)
 		wl_compositor_destroy(d->compositor);
 
 	wl_registry_destroy(d->registry);
+
+	wl_list_for_each_safe(s, stmp, &d->seat_list, link)
+		seat_destroy(s);
+
 	wl_display_roundtrip(d->display);
 	wl_display_disconnect(d->display);
 
