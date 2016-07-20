@@ -40,7 +40,6 @@
 #include <unistd.h>
 
 #include "cal.h"
-#include "platform.h"
 #include "helpers.h"
 #include "xalloc.h"
 #include "oring-clock.h"
