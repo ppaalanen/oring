@@ -44,13 +44,22 @@ pointer_handle_enter(void *data, struct wl_pointer *pointer,
 		     uint32_t serial, struct wl_surface *surface,
 		     wl_fixed_t sx, wl_fixed_t sy)
 {
-	struct seat *s = data;
-	struct display *display = s->display;
+	struct seat *seat = data;
+	struct display *display = seat->display;
+	struct window *window;
 	struct wl_buffer *buffer;
 	struct wl_cursor *cursor = display->default_cursor;
 	struct wl_cursor_image *image;
 
-	if (display->window->fullscreen)
+	assert(!seat->pointer_focus || !"server bug");
+	assert(seat->pointer == pointer);
+
+	window = window_from_wl_surface(surface);
+	seat->pointer_focus = window;
+	if (!window)
+		return;
+
+	if (window->fullscreen)
 		wl_pointer_set_cursor(pointer, serial, NULL, 0, 0);
 	else if (cursor) {
 		image = display->default_cursor->images[0];
@@ -72,6 +81,13 @@ static void
 pointer_handle_leave(void *data, struct wl_pointer *pointer,
 		     uint32_t serial, struct wl_surface *surface)
 {
+	struct seat *seat = data;
+	struct window *window;
+
+	window = window_from_wl_surface(surface);
+	assert(seat->pointer_focus == window || !"server bug");
+
+	seat->pointer_focus = NULL;
 }
 
 static void
@@ -85,11 +101,15 @@ pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
 		      uint32_t serial, uint32_t time, uint32_t button,
 		      uint32_t state)
 {
-	struct seat *s = data;
-	struct display *d = s->display;
+	struct seat *seat = data;
+	struct window *window;
+
+	window = seat->pointer_focus;
+	if (!window)
+		return;
 
 	if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED)
-		wl_shell_surface_move(d->window->shsurf, s->seat, serial);
+		wl_shell_surface_move(window->shsurf, seat->seat, serial);
 }
 
 static void
@@ -118,12 +138,24 @@ keyboard_handle_enter(void *data, struct wl_keyboard *keyboard,
 		      uint32_t serial, struct wl_surface *surface,
 		      struct wl_array *keys)
 {
+	struct seat *seat = data;
+
+	assert(!seat->keyboard_focus || !"server bug");
+
+	seat->keyboard_focus = window_from_wl_surface(surface);
 }
 
 static void
 keyboard_handle_leave(void *data, struct wl_keyboard *keyboard,
 		      uint32_t serial, struct wl_surface *surface)
 {
+	struct seat *seat = data;
+	struct window *window;
+
+	window = window_from_wl_surface(surface);
+	assert(seat->keyboard_focus == window || !"server bug");
+
+	seat->keyboard_focus = NULL;
 }
 
 static void
@@ -131,15 +163,19 @@ keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
 		    uint32_t serial, uint32_t time, uint32_t key,
 		    uint32_t state)
 {
-	struct seat *s = data;
-	struct display *d = s->display;
+	struct seat *seat = data;
+	struct window *window;
 
-	if (!d->shell)
+	window = seat->keyboard_focus;
+	if (!window)
+		return;
+
+	if (!window->display->shell)
 		return;
 
 	if (key == KEY_F11 && state) {
-		d->window->fullscreen = !d->window->fullscreen;
-		shell_surface_set_state(d->window);
+		window->fullscreen = !window->fullscreen;
+		shell_surface_set_state(window);
 	} else if (key == KEY_ESC && state)
 		running = 0;
 }
@@ -174,6 +210,7 @@ seat_handle_capabilities(void *data, struct wl_seat *seat,
 	} else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && s->pointer) {
 		wl_pointer_destroy(s->pointer);
 		s->pointer = NULL;
+		s->pointer_focus = NULL;
 	}
 
 	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !s->keyboard) {
@@ -182,6 +219,7 @@ seat_handle_capabilities(void *data, struct wl_seat *seat,
 	} else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && s->keyboard) {
 		wl_keyboard_destroy(s->keyboard);
 		s->keyboard = NULL;
+		s->keyboard_focus = NULL;
 	}
 }
 

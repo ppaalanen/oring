@@ -393,6 +393,29 @@ window_create(struct display *display, const struct geometry *size,
 	return window;
 }
 
+/** Safe cast from wl_surface
+ *
+ * \param surface The wl_surface to cast from.
+ * \return The corresponding struct window, or NULL.
+ *
+ * This is safe to call with NULL. The returned pointer is non-NULL only
+ * if the wl_surface really has a struct window associated.
+ */
+struct window *
+window_from_wl_surface(struct wl_surface *surface)
+{
+	const void *impl;
+
+	if (!surface)
+		return NULL;
+
+	impl = wl_proxy_get_listener((struct wl_proxy *)surface);
+	if (impl != &surface_listener)
+		return NULL;
+
+	return wl_surface_get_user_data(surface);
+}
+
 static void
 window_destroy(struct window *window)
 {

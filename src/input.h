@@ -27,6 +27,7 @@
 #include <wayland-client.h>
 
 struct display;
+struct window;
 
 struct seat {
 	struct display *display;
@@ -34,8 +35,12 @@ struct seat {
 
 	struct wl_seat *seat;
 	uint32_t global_name;
+
 	struct wl_pointer *pointer;
+	struct window *pointer_focus;
+
 	struct wl_keyboard *keyboard;
+	struct window *keyboard_focus;
 };
 
 struct seat *

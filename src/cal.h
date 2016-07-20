@@ -113,6 +113,9 @@ struct window_output {
 	struct wl_list link;
 };
 
+struct window *
+window_from_wl_surface(struct wl_surface *surface);
+
 struct submission *
 submission_create(struct window *window);
 
