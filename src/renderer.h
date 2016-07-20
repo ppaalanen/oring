@@ -27,7 +27,7 @@
 #include "cal.h"
 
 struct renderer_display *
-renderer_display_create(struct wl_display *wdisp, int swapinterval);
+renderer_display_create(struct wl_display *wdisp);
 
 void
 renderer_display_destroy(struct renderer_display *rd);
@@ -38,7 +38,8 @@ renderer_window_create(struct renderer_display *rd,
 		       int width,
 		       int height,
 		       bool has_alpha,
-		       int buffer_bits);
+		       int buffer_bits,
+		       int swapinterval);
 
 void
 renderer_window_resize(struct renderer_window *rw, int width, int height);

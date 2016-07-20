@@ -57,7 +57,7 @@ struct renderer_window {
 };
 
 struct renderer_display *
-renderer_display_create(struct wl_display *wdisp, int swapinterval)
+renderer_display_create(struct wl_display *wdisp)
 {
 	struct renderer_display *rd;
 	EGLBoolean ret;
@@ -89,17 +89,8 @@ renderer_display_create(struct wl_display *wdisp, int swapinterval)
 		exit(1);
 	}
 
-	ret = eglSwapInterval(rd->dpy, swapinterval);
-	if (ret != EGL_TRUE) {
-		fprintf(stderr,
-			"Error: setting EGL swap interval to %d failed.\n",
-			swapinterval);
-		/* XXX: exit(1); */
-	}
-
-	printf("Initialized EGL %d.%d on Wayland platform with GL ES, "
-	       "swap interval %d.\n",
-	       rd->egl_major, rd->egl_minor, swapinterval);
+	printf("Initialized EGL %d.%d on Wayland platform with GL ES.\n",
+	       rd->egl_major, rd->egl_minor);
 
 	return rd;
 }
@@ -166,7 +157,8 @@ renderer_window_create(struct renderer_display *rd,
 		       int width,
 		       int height,
 		       bool has_alpha,
-		       int buffer_bits)
+		       int buffer_bits,
+		       int swapinterval)
 {
 	static const EGLint context_attribs[] = {
 		EGL_CONTEXT_CLIENT_VERSION, 2,
@@ -214,6 +206,14 @@ renderer_window_create(struct renderer_display *rd,
 
 	ret = eglMakeCurrent(rd->dpy, rw->egl_surface, rw->egl_surface, rw->ctx);
 	assert(ret == EGL_TRUE);
+
+	ret = eglSwapInterval(rd->dpy, swapinterval);
+	if (ret != EGL_TRUE) {
+		fprintf(stderr,
+			"Error: setting EGL swap interval to %d failed.\n",
+			swapinterval);
+		exit(1);
+	}
 
 	return rw;
 }

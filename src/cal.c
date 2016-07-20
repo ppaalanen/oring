@@ -790,8 +790,7 @@ main(int argc, char **argv)
 	}
 
 	display = display_connect();
-	display->render_display = renderer_display_create(display->display,
-							  swapinterval);
+	display->render_display = renderer_display_create(display->display);
 
 	output = display_choose_output(display);
 	if (!output) {
@@ -809,7 +808,8 @@ main(int argc, char **argv)
 				       winsize.width,
 				       winsize.height,
 				       !opaque,
-				       buffer_bits);
+				       buffer_bits,
+				       swapinterval);
 
 	shell_surface_set_state(window);
 
