@@ -689,14 +689,13 @@ display_destroy(struct display *d)
 	wl_list_for_each_safe(s, stmp, &d->seat_list, link)
 		seat_destroy(s);
 
-	wl_display_roundtrip(d->display);
-	wl_display_disconnect(d->display);
-
 	wl_list_for_each_safe(o, otmp, &d->output_list, link) {
 		if (output_unref(o) != 0)
 			fprintf(stderr, "Warning: output leaked.\n");
 	}
 
+	wl_display_roundtrip(d->display);
+	wl_display_disconnect(d->display);
 	free(d);
 }
 
