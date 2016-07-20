@@ -56,6 +56,12 @@ struct renderer_window {
 	EGLSurface egl_surface;
 };
 
+struct renderer_state {
+	GLuint rotation_uniform;
+	GLuint pos;
+	GLuint col;
+};
+
 struct renderer_display *
 renderer_display_create(struct wl_display *wdisp)
 {
@@ -269,9 +275,12 @@ create_shader(struct window *window, const char *source, GLenum shader_type)
 void
 init_gl(struct window *window)
 {
+	struct renderer_state *gl;
 	GLuint frag, vert;
 	GLuint program;
 	GLint status;
+
+	gl = xzalloc(sizeof *gl);
 
 	frag = create_shader(window, frag_shader_text, GL_FRAGMENT_SHADER);
 	vert = create_shader(window, vert_shader_text, GL_VERTEX_SHADER);
@@ -292,15 +301,16 @@ init_gl(struct window *window)
 
 	glUseProgram(program);
 
-	window->gl.pos = 0;
-	window->gl.col = 1;
+	gl->pos = 0;
+	gl->col = 1;
 
-	glBindAttribLocation(program, window->gl.pos, "pos");
-	glBindAttribLocation(program, window->gl.col, "color");
+	glBindAttribLocation(program, gl->pos, "pos");
+	glBindAttribLocation(program, gl->col, "color");
 	glLinkProgram(program);
 
-	window->gl.rotation_uniform =
-		glGetUniformLocation(program, "rotation");
+	gl->rotation_uniform = glGetUniformLocation(program, "rotation");
+
+	window->render_state = gl;
 }
 
 void
@@ -308,6 +318,7 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 {
 	struct window *window = data;
 	struct renderer_window *rw = window->render_window;
+	struct renderer_state *gl = window->render_state;
 	static const GLfloat verts[3][2] = {
 		{ -0.5, -0.5 },
 		{  0.5, -0.5 },
@@ -356,21 +367,21 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 
 	glViewport(0, 0, window->geometry.width, window->geometry.height);
 
-	glUniformMatrix4fv(window->gl.rotation_uniform, 1, GL_FALSE,
+	glUniformMatrix4fv(gl->rotation_uniform, 1, GL_FALSE,
 			   (GLfloat *) rotation);
 
 	glClearColor(0.0, 0.0, 0.0, 0.5);
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	glVertexAttribPointer(window->gl.pos, 2, GL_FLOAT, GL_FALSE, 0, verts);
-	glVertexAttribPointer(window->gl.col, 3, GL_FLOAT, GL_FALSE, 0, colors);
-	glEnableVertexAttribArray(window->gl.pos);
-	glEnableVertexAttribArray(window->gl.col);
+	glVertexAttribPointer(gl->pos, 2, GL_FLOAT, GL_FALSE, 0, verts);
+	glVertexAttribPointer(gl->col, 3, GL_FLOAT, GL_FALSE, 0, colors);
+	glEnableVertexAttribArray(gl->pos);
+	glEnableVertexAttribArray(gl->col);
 
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 
-	glDisableVertexAttribArray(window->gl.pos);
-	glDisableVertexAttribArray(window->gl.col);
+	glDisableVertexAttribArray(gl->pos);
+	glDisableVertexAttribArray(gl->col);
 
 	if (window->opaque || window->fullscreen) {
 		region = wl_compositor_create_region(window->display->compositor);

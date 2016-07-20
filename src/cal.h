@@ -30,10 +30,6 @@
 
 #include <wayland-client.h>
 
-#include <GLES2/gl2.h>
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
 #include "oring-clock.h"
 #include "output.h"
 
@@ -45,6 +41,7 @@ struct window;
 struct seat;
 struct renderer_display;
 struct renderer_window;
+struct renderer_state;
 
 struct submission {
 	struct wl_list link;
@@ -88,12 +85,7 @@ struct window {
 	struct geometry geometry, window_size;
 
 	struct renderer_window *render_window;
-
-	struct {
-		GLuint rotation_uniform;
-		GLuint pos;
-		GLuint col;
-	} gl;
+	struct renderer_state *render_state;
 
 	uint32_t benchmark_time, frames;
 	struct wl_surface *surface;

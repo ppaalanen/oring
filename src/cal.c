@@ -832,6 +832,7 @@ main(int argc, char **argv)
 	fprintf(stderr, TITLE " exiting\n");
 
 	renderer_window_destroy(window->render_window);
+	free(window->render_state); /* XXX */
 	window_destroy(window);
 
 	renderer_display_destroy(display->render_display);
