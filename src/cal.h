@@ -119,4 +119,9 @@ struct window_output {
 struct submission *
 submission_create(struct window *window);
 
+extern int running;
+
+void
+shell_surface_set_state(struct window *window);
+
 #endif /* ORING_CAL_H */

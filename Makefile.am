@@ -12,6 +12,8 @@ oring_cal_SOURCES =							\
 	protocol/presentation-time-protocol.c				\
 	src/cal.c							\
 	src/cal.h							\
+	src/input.c							\
+	src/input.h							\
 	src/oring-clock.c						\
 	src/oring-clock.h						\
 	src/output.c							\

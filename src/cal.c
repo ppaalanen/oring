@@ -33,8 +33,6 @@
 #include <signal.h>
 #include <time.h>
 
-#include <linux/input.h>
-
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <wayland-cursor.h>
@@ -52,6 +50,7 @@
 #include "xalloc.h"
 #include "oring-clock.h"
 #include "timespec-util.h"
+#include "input.h"
 #include "output.h"
 #include "renderer.h"
 
@@ -59,7 +58,7 @@
 
 #define TITLE PACKAGE_STRING " cal"
 
-static int running = 1;
+int running = 1;
 
 static void
 submission_destroy(struct submission *subm)
@@ -261,7 +260,7 @@ create_shell_surface(struct window *window, struct display *display)
 	wl_shell_surface_set_class(window->shsurf, PACKAGE_NAME);
 }
 
-static void
+void
 shell_surface_set_state(struct window *window)
 {
 	if (window->fullscreen) {
@@ -423,152 +422,6 @@ window_destroy(struct window *window)
 	free(window);
 }
 
-static void
-pointer_handle_enter(void *data, struct wl_pointer *pointer,
-		     uint32_t serial, struct wl_surface *surface,
-		     wl_fixed_t sx, wl_fixed_t sy)
-{
-	struct display *display = data;
-	struct wl_buffer *buffer;
-	struct wl_cursor *cursor = display->default_cursor;
-	struct wl_cursor_image *image;
-
-	if (display->window->fullscreen)
-		wl_pointer_set_cursor(pointer, serial, NULL, 0, 0);
-	else if (cursor) {
-		image = display->default_cursor->images[0];
-		buffer = wl_cursor_image_get_buffer(image);
-		if (!buffer)
-			return;
-		wl_pointer_set_cursor(pointer, serial,
-				      display->cursor_surface,
-				      image->hotspot_x,
-				      image->hotspot_y);
-		wl_surface_attach(display->cursor_surface, buffer, 0, 0);
-		wl_surface_damage(display->cursor_surface, 0, 0,
-				  image->width, image->height);
-		wl_surface_commit(display->cursor_surface);
-	}
-}
-
-static void
-pointer_handle_leave(void *data, struct wl_pointer *pointer,
-		     uint32_t serial, struct wl_surface *surface)
-{
-}
-
-static void
-pointer_handle_motion(void *data, struct wl_pointer *pointer,
-		      uint32_t time, wl_fixed_t sx, wl_fixed_t sy)
-{
-}
-
-static void
-pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
-		      uint32_t serial, uint32_t time, uint32_t button,
-		      uint32_t state)
-{
-	struct display *display = data;
-
-	if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED)
-		wl_shell_surface_move(display->window->shsurf,
-						 display->seat, serial);
-}
-
-static void
-pointer_handle_axis(void *data, struct wl_pointer *wl_pointer,
-		    uint32_t time, uint32_t axis, wl_fixed_t value)
-{
-}
-
-static const struct wl_pointer_listener pointer_listener = {
-	pointer_handle_enter,
-	pointer_handle_leave,
-	pointer_handle_motion,
-	pointer_handle_button,
-	pointer_handle_axis,
-};
-
-static void
-keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
-		       uint32_t format, int fd, uint32_t size)
-{
-	close(fd);
-}
-
-static void
-keyboard_handle_enter(void *data, struct wl_keyboard *keyboard,
-		      uint32_t serial, struct wl_surface *surface,
-		      struct wl_array *keys)
-{
-}
-
-static void
-keyboard_handle_leave(void *data, struct wl_keyboard *keyboard,
-		      uint32_t serial, struct wl_surface *surface)
-{
-}
-
-static void
-keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
-		    uint32_t serial, uint32_t time, uint32_t key,
-		    uint32_t state)
-{
-	struct display *d = data;
-
-	if (!d->shell)
-		return;
-
-	if (key == KEY_F11 && state) {
-		d->window->fullscreen = !d->window->fullscreen;
-		shell_surface_set_state(d->window);
-	} else if (key == KEY_ESC && state)
-		running = 0;
-}
-
-static void
-keyboard_handle_modifiers(void *data, struct wl_keyboard *keyboard,
-			  uint32_t serial, uint32_t mods_depressed,
-			  uint32_t mods_latched, uint32_t mods_locked,
-			  uint32_t group)
-{
-}
-
-static const struct wl_keyboard_listener keyboard_listener = {
-	keyboard_handle_keymap,
-	keyboard_handle_enter,
-	keyboard_handle_leave,
-	keyboard_handle_key,
-	keyboard_handle_modifiers,
-};
-
-static void
-seat_handle_capabilities(void *data, struct wl_seat *seat,
-			 enum wl_seat_capability caps)
-{
-	struct display *d = data;
-
-	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->pointer) {
-		d->pointer = wl_seat_get_pointer(seat);
-		wl_pointer_add_listener(d->pointer, &pointer_listener, d);
-	} else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->pointer) {
-		wl_pointer_destroy(d->pointer);
-		d->pointer = NULL;
-	}
-
-	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->keyboard) {
-		d->keyboard = wl_seat_get_keyboard(seat);
-		wl_keyboard_add_listener(d->keyboard, &keyboard_listener, d);
-	} else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->keyboard) {
-		wl_keyboard_destroy(d->keyboard);
-		d->keyboard = NULL;
-	}
-}
-
-static const struct wl_seat_listener seat_listener = {
-	seat_handle_capabilities,
-};
-
 static int
 register_wl_compositor(struct display *d, void *proxy, uint32_t name)
 {
@@ -595,10 +448,15 @@ static int
 register_wl_seat(struct display *d, void *proxy, uint32_t name)
 {
 	assert(wl_proxy_get_version(proxy) == 1);
-	assert(!d->seat);
 
-	d->seat = proxy;
-	wl_seat_add_listener(d->seat, &seat_listener, d);
+	if (d->seat) {
+		fprintf(stderr, "Unimplemented: support for multiple wl_seats.\n");
+		wl_seat_destroy((struct wl_seat *)proxy);
+
+		return 0;
+	}
+
+	d->seat = seat_register(d, proxy);
 
 	return 0;
 }
