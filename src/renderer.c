@@ -339,6 +339,7 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 	static const uint32_t speed_div = 5, benchmark_interval = 5;
 	struct wl_region *region;
 	struct timeval tv;
+	struct submission *subm;
 
 	assert(window->callback == callback);
 	window->callback = NULL;
@@ -394,7 +395,9 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 		wl_surface_set_opaque_region(window->surface, NULL);
 	}
 
-	submission_create(window);
+	/* XXX: implement prediction */
+	subm = submission_create(window, oring_clock_get_nsec_now(&window->display->gfx_clock) + 10);
 	eglSwapBuffers(rw->render_display->dpy, rw->egl_surface);
+	submission_set_commit_time(subm);
 	window->frames++;
 }

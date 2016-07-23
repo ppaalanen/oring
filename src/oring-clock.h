@@ -57,4 +57,7 @@ oring_clock_get_nsec_now(const struct oring_clock *oc);
 const char *
 clock_get_name(clockid_t clock_id);
 
+double
+time_subtract(uint64_t a, uint64_t b);
+
 #endif /* ORING_CLOCK_H */

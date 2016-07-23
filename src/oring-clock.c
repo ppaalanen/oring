@@ -235,3 +235,20 @@ clock_get_name(clockid_t clock_id)
 
 	return names[idx];
 }
+
+/** Compute time difference
+ * \param a Latter timestamp.
+ * \param b Former timestamp.
+ * \return  a - b, cast to double. The units are the same as for a and b.
+ *
+ * This functions does the subtraction with integers and converts to
+ * double only afterwards to maintain precision.
+ */
+double
+time_subtract(uint64_t a, uint64_t b)
+{
+	if (a > b)
+		return (double)(a - b);
+	else
+		return -(double)(b - a);
+}

@@ -36,6 +36,7 @@
 #include "presentation-time-client-protocol.h"
 
 #define INVALID_CLOCK_ID 9999
+#define INVALID_TIME 0xffffffffffffffffULL
 
 struct window;
 struct seat;
@@ -47,9 +48,14 @@ struct submission {
 	struct wl_list link;
 	struct window *window;
 
+	uint64_t commit_time;
+	uint64_t target_time;
+
 	struct wl_callback *frame;
-	bool frame_done;
+	uint64_t frame_time;
+
 	struct wp_presentation_feedback *feedback;
+	uint64_t presented_time;
 
 	struct output *sync_output;
 };
@@ -108,7 +114,10 @@ struct window *
 window_from_wl_surface(struct wl_surface *surface);
 
 struct submission *
-submission_create(struct window *window);
+submission_create(struct window *window, uint64_t target_time);
+
+void
+submission_set_commit_time(struct submission *subm);
 
 extern int running;
 

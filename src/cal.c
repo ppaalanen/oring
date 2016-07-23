@@ -73,20 +73,22 @@ static void
 submission_finish(struct submission *subm)
 {
 	struct window *window = subm->window;
+	uint32_t output_name = 9999;
+	uint64_t dt;
+
+	if (subm->sync_output)
+		output_name = subm->sync_output->name;
+
+	if (subm->presented_time != INVALID_TIME) {
+		dt = time_subtract(subm->presented_time, subm->target_time);
+		printf("presented at %.3f ms on output-%d, %.1f us from target\n",
+		       (double)subm->presented_time * 1e-6,
+		       output_name, dt * 1e-3);
+	}
 
 	submission_destroy(subm);
 
 	printf("Trigger %p!\n", window);
-}
-
-static void
-submission_feedback_destroy(struct submission *subm,
-			    struct wp_presentation_feedback *feedback)
-{
-	assert(feedback == subm->feedback);
-
-	wp_presentation_feedback_destroy(subm->feedback);
-	subm->feedback = NULL;
 }
 
 static void
@@ -96,6 +98,8 @@ feedback_handle_sync_output(void *data,
 {
 	struct submission *subm = data;
 	struct output *output;
+
+	assert(feedback == subm->feedback);
 
 	if (subm->sync_output)
 		return;
@@ -118,17 +122,12 @@ feedback_handle_presented(void *data,
 	struct submission *subm = data;
 	struct display *d = subm->window->display;
 	struct timespec tm;
-	uint64_t nsec;
 
-	assert(subm->frame_done);
+	assert(feedback == subm->feedback);
+	assert(subm->frame_time != INVALID_TIME);
 
 	timespec_from_proto(&tm, tv_sec_hi, tv_sec_lo, tv_nsec);
-	nsec = oring_clock_get_nsec(&d->gfx_clock, &tm);
-
-	printf("presented at %.3f ms on output-%d\n", (double)nsec * 1e-6,
-	       subm->sync_output ? subm->sync_output->name : 9999);
-
-	submission_feedback_destroy(subm, feedback);
+	subm->presented_time = oring_clock_get_nsec(&d->gfx_clock, &tm);
 
 	submission_finish(subm);
 }
@@ -139,9 +138,9 @@ feedback_handle_discarded(void *data,
 {
 	struct submission *subm = data;
 
-	fprintf(stderr, "Warning: frame discarded unexpectedly.\n");
+	assert(feedback == subm->feedback);
 
-	submission_feedback_destroy(subm, feedback);
+	fprintf(stderr, "Warning: frame discarded unexpectedly.\n");
 
 	submission_finish(subm);
 }
@@ -157,17 +156,16 @@ static void
 frame_callback_handle_done(void *data, struct wl_callback *cb, uint32_t arg)
 {
 	struct submission *subm = data;
+	struct display *display = subm->window->display;
 
 	assert(cb == subm->frame);
 
 	wl_callback_destroy(subm->frame);
 	subm->frame = NULL;
-	subm->frame_done = true;
+	subm->frame_time = oring_clock_get_nsec_now(&display->gfx_clock);
 
-	if (!subm->window->display->presentation)
+	if (!display->presentation)
 		submission_finish(subm);
-
-	printf("Frame\n");
 }
 
 static const struct wl_callback_listener frame_callback_listener = {
@@ -175,17 +173,20 @@ static const struct wl_callback_listener frame_callback_listener = {
 };
 
 struct submission *
-submission_create(struct window *window)
+submission_create(struct window *window, uint64_t target_time)
 {
 	struct submission *subm;
 	struct display *d = window->display;
 
 	subm = xzalloc(sizeof *subm);
 	subm->window = window;
+	subm->target_time = target_time;
+	subm->commit_time = INVALID_TIME;
+	subm->frame_time = INVALID_TIME;
+	subm->presented_time = INVALID_TIME;
 
 	subm->frame = wl_surface_frame(window->surface);
 	wl_callback_add_listener(subm->frame, &frame_callback_listener, subm);
-	subm->frame_done = false;
 
 	if (d->presentation) {
 		subm->feedback = wp_presentation_feedback(d->presentation,
@@ -198,6 +199,14 @@ submission_create(struct window *window)
 	wl_list_insert(&window->submissions_list, &subm->link);
 
 	return subm;
+}
+
+void
+submission_set_commit_time(struct submission *subm)
+{
+	struct display *display = subm->window->display;
+
+	subm->commit_time = oring_clock_get_nsec_now(&display->gfx_clock);
 }
 
 static void
