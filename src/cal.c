@@ -417,9 +417,6 @@ window_destroy(struct window *window)
 	wl_shell_surface_destroy(window->shsurf);
 	wl_surface_destroy(window->surface);
 
-	if (window->callback)
-		wl_callback_destroy(window->callback);
-
 	wl_list_for_each_safe(subm, tmp, &window->submissions_list, link)
 		submission_destroy(subm);
 

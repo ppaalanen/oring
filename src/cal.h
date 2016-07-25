@@ -107,7 +107,6 @@ struct window {
 	uint32_t benchmark_time, frames;
 	struct wl_surface *surface;
 	struct wl_shell_surface *shsurf;
-	struct wl_callback *callback;
 
 	bool fullscreen;
 	bool opaque;

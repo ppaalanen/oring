@@ -341,9 +341,6 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 	struct timeval tv;
 	struct submission *subm;
 
-	assert(window->callback == callback);
-	window->callback = NULL;
-
 	if (callback)
 		wl_callback_destroy(callback);
 
