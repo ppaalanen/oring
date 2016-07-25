@@ -38,6 +38,7 @@
 #define INVALID_CLOCK_ID 9999
 #define INVALID_TIME 0xffffffffffffffffULL
 
+struct display;
 struct window;
 struct seat;
 struct renderer_display;
@@ -60,11 +61,21 @@ struct submission {
 	struct output *sync_output;
 };
 
+struct watch {
+	struct display *display;
+	int fd;
+	void (*cb)(struct watch *w, uint32_t events);
+};
+
 struct display {
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct wl_compositor *compositor;
 	struct wl_shell *shell;
+
+	int epoll_fd;
+
+	struct watch display_watch;
 
 	struct wp_presentation *presentation;
 	clockid_t clock_id;

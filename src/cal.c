@@ -32,12 +32,14 @@
 #include <assert.h>
 #include <signal.h>
 #include <time.h>
+#include <errno.h>
 
 #include <wayland-client.h>
 #include <wayland-cursor.h>
 
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 
 #include "cal.h"
 #include "helpers.h"
@@ -51,6 +53,7 @@
 #include "presentation-time-client-protocol.h"
 
 #define TITLE PACKAGE_STRING " cal"
+#define MAX_EPOLL_WATCHES 6
 
 int running = 1;
 
@@ -619,11 +622,120 @@ static const struct wl_registry_listener registry_listener = {
 	registry_handle_global_remove
 };
 
+static int
+watch_ctl_(struct watch *w, int op, uint32_t events)
+{
+	struct epoll_event ee;
+
+	ee.events = events;
+	ee.data.ptr = w;
+	return epoll_ctl(w->display->epoll_fd, op, w->fd, &ee);
+}
+
+/** Initialize an fd watch
+ *
+ * \param w The uninitialized struct watch to overwrite.
+ * \param d The display where the epoll object is.
+ * \param fd The file descriptor to watch.
+ * \param cb The handler to call when the fd becomes operable.
+ * \return 0 on success, -1 on error with errno set from epoll_ctl().
+ *
+ * This makes the fd being watched for errors and hangups, but not for
+ * input or output. The display object must persist until watch_remove()
+ * is called for this watch.
+ */
+static int
+watch_init(struct watch *w, struct display *d, int fd,
+	   void (*cb)(struct watch *, uint32_t))
+{
+	w->display = d;
+	w->fd = fd;
+	w->cb = cb;
+
+	return watch_ctl_(w, EPOLL_CTL_ADD, 0);
+}
+
+/** Remove an fd watch
+ *
+ * \param w The watch to remove.
+ *
+ * Remove the watch from the display. The watch becomes uninitialized.
+ * No calls to the callback will follow.
+ */
+static void
+watch_remove(struct watch *w)
+{
+	epoll_ctl(w->display->epoll_fd, EPOLL_CTL_DEL, w->fd, NULL);
+}
+
+/** Watch for input and output
+ *
+ * \param w The watch.
+ * \return 0 on success, -1 on error with errno set from epoll_ctl().
+ *
+ * The watch will trigger for both readable and writable fd.
+ */
+static int
+watch_set_in_out(struct watch *w)
+{
+	return watch_ctl_(w, EPOLL_CTL_MOD, EPOLLIN | EPOLLOUT);
+}
+
+/** Watch for input
+ *
+ * \param w The watch.
+ * \return 0 on success, -1 on error with errno set from epoll_ctl().
+ *
+ * The watch will trigger for readable fd.
+ */
+static int
+watch_set_in(struct watch *w)
+{
+	return watch_ctl_(w, EPOLL_CTL_MOD, EPOLLIN);
+}
+
+static void
+display_handle_data(struct watch *w, uint32_t events)
+{
+	struct display *d = wl_container_of(w, d, display_watch);
+	int ret;
+
+	if (events & EPOLLERR) {
+		fprintf(stderr, "Display connection errored out.\n");
+		running = 0;
+		return;
+	}
+
+	if (events & EPOLLHUP) {
+		fprintf(stderr, "Display connection hung up.\n");
+		running = 0;
+		return;
+	}
+
+	if (events & EPOLLIN) {
+		ret = wl_display_dispatch(d->display);
+		if (ret < 0) {
+			fprintf(stderr, "Display dispatch error.\n");
+			running = 0;
+			return;
+		}
+	}
+
+	if (events & EPOLLOUT) {
+		ret = wl_display_flush(d->display);
+		if (ret == 0)
+			watch_set_in(&d->display_watch);
+		else if (ret < 0 && errno != EAGAIN)
+			running = 0;
+	}
+}
+
 static struct display *
 display_connect(void)
 {
 	struct display *d;
 	const char *clockname;
+	int dpy_fd;
 
 	d = xzalloc(sizeof(*d));
 
@@ -631,9 +743,22 @@ display_connect(void)
 	wl_list_init(&d->seat_list);
 	d->clock_id = INVALID_CLOCK_ID;
 
+	d->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+	if (d->epoll_fd == -1) {
+		perror("Error on epoll_create1");
+		exit(1);
+	}
+
 	d->display = wl_display_connect(NULL);
 	if (!d->display) {
 		perror("Error connecting");
+		exit(1);
+	}
+
+	dpy_fd = wl_display_get_fd(d->display);
+	watch_init(&d->display_watch, d, dpy_fd, display_handle_data);
+	if (watch_set_in(&d->display_watch) < 0) {
+		perror("Error setting up display epoll");
 		exit(1);
 	}
 
@@ -678,6 +803,8 @@ display_destroy(struct display *d)
 	struct output *o, *otmp;
 	struct seat *s, *stmp;
 
+	watch_remove(&d->display_watch);
+
 	wl_surface_destroy(d->cursor_surface);
 	if (d->cursor_theme)
 		wl_cursor_theme_destroy(d->cursor_theme);
@@ -700,6 +827,9 @@ display_destroy(struct display *d)
 
 	wl_display_roundtrip(d->display);
 	wl_display_disconnect(d->display);
+
+	close(d->epoll_fd);
+
 	free(d);
 }
 
@@ -766,6 +896,50 @@ usage(int error_code)
 	exit(error_code);
 }
 
+static void
+mainloop(struct display *display)
+{
+	struct epoll_event ee[MAX_EPOLL_WATCHES];
+	struct watch *w;
+	int count;
+	int i;
+	int ret;
+
+	running = 1;
+
+	while (1) {
+		wl_display_dispatch_pending(display->display);
+
+		if (!running)
+			break;
+
+		/* The mainloop here is a little subtle.  Redrawing will cause
+		* EGL to read events so we can just call
+		* wl_display_dispatch_pending() to handle any events that got
+		* queued up as a side effect. */
+		redraw(display->window, NULL, 0);
+
+		ret = wl_display_flush(display->display);
+		if (ret < 0 && errno == EAGAIN) {
+			watch_set_in_out(&display->display_watch);
+		} else if (ret < 0) {
+			break;
+		}
+
+		count = epoll_wait(display->epoll_fd,
+				   ee, ARRAY_LENGTH(ee), -1);
+		if (count < 0 && errno != EINTR) {
+			perror("Error with epoll_wait");
+			exit(1);
+		}
+
+		for (i = 0; i < count; i++) {
+			w = ee[i].data.ptr;
+			w->cb(w, ee[i].events);
+		}
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -778,7 +952,7 @@ main(int argc, char **argv)
 	int swapinterval = 1;
 	int buffer_bits = 32;
 	struct geometry winsize = { 250, 250 };
-	int i, ret = 0;
+	int i;
 
 	printf(TITLE "\n");
 
@@ -828,14 +1002,7 @@ main(int argc, char **argv)
 	sigint.sa_flags = SA_RESETHAND;
 	sigaction(SIGINT, &sigint, NULL);
 
-	/* The mainloop here is a little subtle.  Redrawing will cause
-	 * EGL to read events so we can just call
-	 * wl_display_dispatch_pending() to handle any events that got
-	 * queued up as a side effect. */
-	while (running && ret != -1) {
-		wl_display_dispatch_pending(display->display);
-		redraw(window, NULL, 0);
-	}
+	mainloop(display);
 
 	fprintf(stderr, TITLE " exiting\n");
 
