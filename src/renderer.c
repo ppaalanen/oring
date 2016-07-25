@@ -313,10 +313,9 @@ init_gl(struct window *window)
 	window->render_state = gl;
 }
 
-void
-redraw(void *data, struct wl_callback *callback, uint32_t time)
+struct submission *
+redraw(struct window *window, uint64_t target_time)
 {
-	struct window *window = data;
 	struct renderer_window *rw = window->render_window;
 	struct renderer_state *gl = window->render_state;
 	static const GLfloat verts[3][2] = {
@@ -340,9 +339,7 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 	struct wl_region *region;
 	struct timeval tv;
 	struct submission *subm;
-
-	if (callback)
-		wl_callback_destroy(callback);
+	uint32_t time;
 
 	gettimeofday(&tv, NULL);
 	time = tv.tv_sec * 1000 + tv.tv_usec / 1000;
@@ -392,9 +389,10 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 		wl_surface_set_opaque_region(window->surface, NULL);
 	}
 
-	/* XXX: implement prediction */
-	subm = submission_create(window, oring_clock_get_nsec_now(&window->display->gfx_clock) + 10);
+	subm = submission_create(window, target_time);
 	eglSwapBuffers(rw->render_display->dpy, rw->egl_surface);
 	submission_set_commit_time(subm);
 	window->frames++;
+
+	return subm;
 }

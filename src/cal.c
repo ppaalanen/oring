@@ -78,20 +78,27 @@ submission_finish(struct submission *subm)
 	struct window *window = subm->window;
 	uint32_t output_name = 9999;
 	uint64_t dt;
+	uint64_t target_time;
 
 	if (subm->sync_output)
 		output_name = subm->sync_output->name;
 
 	if (subm->presented_time != INVALID_TIME) {
 		dt = time_subtract(subm->presented_time, subm->target_time);
-		printf("presented at %.3f ms on output-%d, %.1f us from target\n",
+		printf("presented at %.3f ms on output-%d, %.1f ms from target\n",
 		       (double)subm->presented_time * 1e-6,
-		       output_name, dt * 1e-3);
+		       output_name, dt * 1e-6);
+
+		/* XXX: implement proper prediction */
+		target_time = subm->presented_time + 16666;
+	} else {
+		target_time = oring_clock_get_nsec_now(&window->display->gfx_clock) + 16666;
 	}
 
 	submission_destroy(subm);
 
-	printf("Trigger %p!\n", window);
+	/* XXX: do this from main loop */
+	redraw(window, target_time);
 }
 
 static void
@@ -910,12 +917,6 @@ mainloop(struct display *display)
 		if (!running)
 			break;
 
-		/* The mainloop here is a little subtle.  Redrawing will cause
-		* EGL to read events so we can just call
-		* wl_display_dispatch_pending() to handle any events that got
-		* queued up as a side effect. */
-		redraw(display->window, NULL, 0);
-
 		ret = wl_display_flush(display->display);
 		if (ret < 0 && errno == EAGAIN) {
 			watch_set_in_out(&display->display_watch);
@@ -999,6 +1000,7 @@ main(int argc, char **argv)
 	sigint.sa_flags = SA_RESETHAND;
 	sigaction(SIGINT, &sigint, NULL);
 
+	redraw(window, 0);
 	mainloop(display);
 
 	fprintf(stderr, TITLE " exiting\n");

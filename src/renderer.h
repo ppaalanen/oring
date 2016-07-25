@@ -50,7 +50,7 @@ renderer_window_destroy(struct renderer_window *rw);
 void
 init_gl(struct window *window);
 
-void
-redraw(void *data, struct wl_callback *callback, uint32_t time);
+struct submission *
+redraw(struct window *window, uint64_t target_time);
 
 #endif /* ORING_RENDERER_H */
