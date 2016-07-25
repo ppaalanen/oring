@@ -76,6 +76,7 @@ struct display {
 	int epoll_fd;
 
 	struct watch display_watch;
+	bool must_read;
 
 	struct wp_presentation *presentation;
 	clockid_t clock_id;

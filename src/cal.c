@@ -702,6 +702,7 @@ static void
 display_handle_data(struct watch *w, uint32_t events)
 {
 	struct display *d = wl_container_of(w, d, display_watch);
+	struct wl_display *dpy = d->display;
 	int ret;
 
 	if (events & EPOLLERR) {
@@ -717,9 +718,13 @@ display_handle_data(struct watch *w, uint32_t events)
 	}
 
 	if (events & EPOLLIN) {
-		ret = wl_display_dispatch(d->display);
+		assert(d->must_read);
+
+		ret = wl_display_read_events(dpy);
+		d->must_read = false;
+
 		if (ret < 0) {
-			fprintf(stderr, "Display dispatch error.\n");
+			perror("Display read error\n");
 			running = 0;
 			return;
 		}
@@ -759,6 +764,7 @@ display_connect(void)
 		exit(1);
 	}
 
+	d->must_read = false;
 	dpy_fd = wl_display_get_fd(d->display);
 	watch_init(&d->display_watch, d, dpy_fd, display_handle_data);
 	if (watch_set_in(&d->display_watch) < 0) {
@@ -900,19 +906,23 @@ usage(int error_code)
 	exit(error_code);
 }
 
-static void
+static int
 mainloop(struct display *display)
 {
 	struct epoll_event ee[MAX_EPOLL_WATCHES];
+	struct wl_display *dpy = display->display;
 	struct watch *w;
 	int count;
 	int i;
 	int ret;
+	int myret = 0;
 
 	running = 1;
 
 	while (1) {
-		wl_display_dispatch_pending(display->display);
+		while (wl_display_prepare_read(dpy) < 0)
+			wl_display_dispatch_pending(dpy);
+		display->must_read = true;
 
 		if (!running)
 			break;
@@ -921,21 +931,34 @@ mainloop(struct display *display)
 		if (ret < 0 && errno == EAGAIN) {
 			watch_set_in_out(&display->display_watch);
 		} else if (ret < 0) {
+			myret = errno;
+			perror("Display flush failed");
 			break;
 		}
 
 		count = epoll_wait(display->epoll_fd,
 				   ee, ARRAY_LENGTH(ee), -1);
 		if (count < 0 && errno != EINTR) {
+			myret = errno;
 			perror("Error with epoll_wait");
-			exit(1);
+			break;
 		}
 
 		for (i = 0; i < count; i++) {
 			w = ee[i].data.ptr;
 			w->cb(w, ee[i].events);
 		}
+
+		if (display->must_read)
+			wl_display_cancel_read(dpy);
+		display->must_read = false;
 	}
+
+	if (display->must_read)
+		wl_display_cancel_read(dpy);
+	display->must_read = false;
+
+	return myret;
 }
 
 int
