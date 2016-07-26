@@ -972,8 +972,9 @@ display_choose_output(struct display *d)
 		}
 
 		if (output->current)
-			printf("%dx%d ", output->current->width,
-			       output->current->height);
+			printf("%dx%d @ %.1f Hz ", output->current->width,
+			       output->current->height,
+			       output->current->millihz * 1e-3);
 		else
 			printf("(no mode) ");
 
