@@ -57,6 +57,29 @@
 
 int running = 1;
 
+/** Get one of the outputs the window is on
+ *
+ * \param window A window to identify the wl_surface.
+ * \return An output the wl_surface has entered but not left.
+ *
+ * Since it is impossible to know from wl_surface.enter and leave events
+ * which output is considered the primary or sync output for the wl_surface,
+ * this function just returns the oldest entered output.
+ */
+static struct output *
+window_get_output(struct window *window)
+{
+	struct window_output *wo;
+
+	if (wl_list_empty(&window->on_output_list))
+		return NULL;
+
+	wo = container_of(window->on_output_list.prev,
+			  struct window_output, link);
+
+	return wo->output;
+}
+
 static void
 submission_destroy(struct submission *subm)
 {
@@ -70,6 +93,60 @@ submission_destroy(struct submission *subm)
 		output_unref(subm->sync_output);
 
 	free(subm);
+}
+
+static uint64_t
+predict_next_frame_time_by_presented(struct submission *subm)
+{
+	uint64_t period = subm->next_nsec;
+	struct output *output;
+
+	/* If the compositor didn't know, guess from the sync output rate */
+	if (period == 0) {
+		/* If we get here, we have already lost accuracy. */
+		output = subm->sync_output;
+
+		/* If no sync output given, guess which output */
+		if (!output)
+			output = window_get_output(subm->window);
+
+		/* If window is on no output, it won't get shown, so...
+		 * whatever. If there is an output, guess from its rate.
+		 */
+		if (!output)
+			period = millihz_to_nsec(60000);
+		else
+			period = millihz_to_nsec(output->current->millihz);
+	}
+
+	return subm->presented_time + period;
+}
+
+static uint64_t
+predict_next_frame_time_by_framecb(struct submission *subm)
+{
+	struct window *window = subm->window;
+	struct output *output;
+	uint64_t now;
+	uint64_t period;
+
+	/* guess which output */
+	output = window_get_output(window);
+	period = millihz_to_nsec(output->current->millihz);
+
+	/* Don't have any better time reference. */
+	now = oring_clock_get_nsec_now(&window->display->gfx_clock);
+
+	/* Frame callbacks get sent when the compositor paints frame N,
+	 * which means it is too late to hit frame N, hence we aim for
+	 * frame N+1. Frame callbacks get sent before frame N is presented.
+	 *
+	 * Assuming frame callbacks get sent half a period before frame N
+	 * presentation, the latency to screen would be 1.5 periods.
+	 * But different compositors are different. Oh well.
+	 */
+
+	return now + period * 3 / 2;
 }
 
 static void
@@ -89,10 +166,9 @@ submission_finish(struct submission *subm)
 		       (double)subm->presented_time * 1e-6,
 		       output_name, dt * 1e-6);
 
-		/* XXX: implement proper prediction */
-		target_time = subm->presented_time + 16666;
+		target_time = predict_next_frame_time_by_presented(subm);
 	} else {
-		target_time = oring_clock_get_nsec_now(&window->display->gfx_clock) + 16666;
+		target_time = predict_next_frame_time_by_framecb(subm);
 	}
 
 	submission_destroy(subm);
@@ -118,6 +194,15 @@ feedback_handle_sync_output(void *data,
 	subm->sync_output = output_ref(output);
 }
 
+static const struct warn_flag_item {
+	uint32_t flag;
+	const char *msg;
+} warn_flags[] = {
+	{ WP_PRESENTATION_FEEDBACK_KIND_VSYNC, "synchronized to vblank" },
+	{ WP_PRESENTATION_FEEDBACK_KIND_HW_CLOCK, "using hardware clock" },
+	{ WP_PRESENTATION_FEEDBACK_KIND_HW_COMPLETION, "signalled by hardware" },
+};
+
 static void
 feedback_handle_presented(void *data,
 			  struct wp_presentation_feedback *feedback,
@@ -132,12 +217,26 @@ feedback_handle_presented(void *data,
 	struct submission *subm = data;
 	struct display *d = subm->window->display;
 	struct timespec tm;
+	unsigned i;
 
 	assert(feedback == subm->feedback);
 	assert(subm->frame_time != INVALID_TIME);
 
 	timespec_from_proto(&tm, tv_sec_hi, tv_sec_lo, tv_nsec);
 	subm->presented_time = oring_clock_get_nsec(&d->gfx_clock, &tm);
+	subm->next_nsec = refresh;
+
+	for (i = 0; i < ARRAY_LENGTH(warn_flags); i++) {
+		if (flags & warn_flags[i].flag)
+			continue;
+
+		if (d->warned_flags & warn_flags[i].flag)
+			continue;
+
+		fprintf(stderr, "Warning: presentation was not %s.\n",
+			warn_flags[i].msg);
+		d->warned_flags |= warn_flags[i].flag;
+	}
 
 	submission_finish(subm);
 }

@@ -57,6 +57,7 @@ struct submission {
 
 	struct wp_presentation_feedback *feedback;
 	uint64_t presented_time;
+	uint64_t next_nsec;
 
 	struct output *sync_output;
 };
@@ -80,6 +81,7 @@ struct display {
 
 	struct wp_presentation *presentation;
 	clockid_t clock_id;
+	uint32_t warned_flags;
 	struct oring_clock gfx_clock;
 	struct renderer_display *render_display;
 
