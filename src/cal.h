@@ -111,6 +111,8 @@ struct window {
 	struct wl_surface *surface;
 	struct wl_shell_surface *shsurf;
 
+	uint64_t target_time;
+
 	bool fullscreen;
 	bool opaque;
 

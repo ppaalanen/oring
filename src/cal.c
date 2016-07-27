@@ -97,6 +97,26 @@ window_get_output(struct window *window)
 	return wo->output;
 }
 
+/** Schedule repaint of the next frame
+ *
+ * \param window The window to repaint.
+ * \param nsec The presentation time for the next frame.
+ *
+ * The presentation time must be the predicted time in display::gfx_clock
+ * nanoseconds when the frame will be shown.
+ *
+ * The physics model state will be predicted for the given time and
+ * drawn in that state.
+ */
+static void
+window_schedule_repaint(struct window *window, uint64_t nsec)
+{
+	if (window->target_time != INVALID_TIME)
+		fprintf(stderr, "Warning: overriding previous target time.\n");
+
+	window->target_time = nsec;
+}
+
 static void
 submission_destroy(struct submission *subm)
 {
@@ -195,8 +215,7 @@ submission_finish(struct submission *subm)
 
 	submission_destroy(subm);
 
-	/* XXX: do this from main loop */
-	redraw(window, target_time);
+	window_schedule_repaint(window, target_time);
 }
 
 static void
@@ -501,6 +520,7 @@ window_create(struct display *display, const struct geometry *size,
 	window->window_size = window->geometry;
 	window->opaque = opaque;
 	window->fullscreen = fullscreen;
+	window->target_time = INVALID_TIME;
 
 	wl_list_init(&window->submissions_list);
 	wl_list_init(&window->on_output_list);
@@ -964,6 +984,17 @@ display_destroy(struct display *d)
 	free(d);
 }
 
+static void
+display_run_idle_tasks(struct display *display)
+{
+	struct window *window = display->window;
+
+	if (window->target_time != INVALID_TIME) {
+		redraw(window, window->target_time);
+		window->target_time = INVALID_TIME;
+	}
+}
+
 static const char * const output_transform_string[] = {
 	[WL_OUTPUT_TRANSFORM_NORMAL] = "normal",
 	[WL_OUTPUT_TRANSFORM_90] = "90",
@@ -1042,13 +1073,27 @@ mainloop(struct display *display)
 	running = 1;
 
 	while (1) {
+		/* The main dispatch of Wayland events */
+		wl_display_dispatch_pending(dpy);
+
+		/* Do this before prepare_read to minize the time between
+		 * prepare_read and read_events/cancel_read to avoid stalling
+		 * other threads more than necessary.
+		 */
+		display_run_idle_tasks(display);
+
+		/* Left-over dispatch to ensure prepare_read succeeds. */
 		while (wl_display_prepare_read(dpy) < 0)
 			wl_display_dispatch_pending(dpy);
 		display->must_read = true;
 
+		/* The normal exit condition. */
 		if (!running)
 			break;
 
+		/* Flush out buffered requests. If the Wayland socket is
+		 * full, poll it for writable too, and continue flushing then.
+		 */
 		ret = wl_display_flush(display->display);
 		if (ret < 0 && errno == EAGAIN) {
 			watch_set_in_out(&display->display_watch);
@@ -1058,6 +1103,7 @@ mainloop(struct display *display)
 			break;
 		}
 
+		/* Wait for events or signals */
 		count = epoll_wait(display->epoll_fd,
 				   ee, ARRAY_LENGTH(ee), -1);
 		if (count < 0 && errno != EINTR) {
@@ -1066,11 +1112,18 @@ mainloop(struct display *display)
 			break;
 		}
 
+		/* Wayland events only read in the callback, not dispatched,
+		 * if the Wayland socket signalled readable. If it signalled
+		 * writable, flush more. See display_handle_data().
+		 */
 		for (i = 0; i < count; i++) {
 			w = ee[i].data.ptr;
 			w->cb(w, ee[i].events);
 		}
 
+		/* Match the prepare_read call in case the Wayland socket
+		 * did not need servicing.
+		 */
 		if (display->must_read)
 			wl_display_cancel_read(dpy);
 		display->must_read = false;
@@ -1145,7 +1198,7 @@ main(int argc, char **argv)
 	sigint.sa_flags = SA_RESETHAND;
 	sigaction(SIGINT, &sigint, NULL);
 
-	redraw(window, 0);
+	window_schedule_repaint(window, 0);
 	mainloop(display);
 
 	fprintf(stderr, TITLE " exiting\n");
