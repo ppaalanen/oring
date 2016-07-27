@@ -154,7 +154,7 @@ submission_finish(struct submission *subm)
 {
 	struct window *window = subm->window;
 	uint32_t output_name = 9999;
-	uint64_t dt;
+	double dt;
 	uint64_t target_time;
 
 	if (subm->sync_output)
