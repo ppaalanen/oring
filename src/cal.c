@@ -57,6 +57,12 @@
 
 int running = 1;
 
+/** Convert nanoseconds to a nice number with units
+ *
+ * \param nsec Nanoseconds to convert.
+ * \param unit Returns a pointer to the string for units.
+ * \return The number in the returned units.
+ */
 static double
 format_nsec(double nsec, const char **unit)
 {
