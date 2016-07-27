@@ -126,8 +126,6 @@ window_schedule_repaint(struct window *window, uint64_t nsec)
 static void
 submission_destroy(struct submission *subm)
 {
-	wl_list_remove(&subm->link);
-
 	if (subm->frame)
 		wl_callback_destroy(subm->frame);
 	if (subm->feedback)
@@ -219,8 +217,6 @@ submission_finish(struct submission *subm)
 		target_time = predict_next_frame_time_by_framecb(subm);
 	}
 
-	submission_destroy(subm);
-
 	window_schedule_repaint(window, target_time);
 }
 
@@ -269,6 +265,9 @@ feedback_handle_presented(void *data,
 	assert(feedback == subm->feedback);
 	assert(subm->frame_time != INVALID_TIME);
 
+	wp_presentation_feedback_destroy(subm->feedback);
+	subm->feedback = NULL;
+
 	timespec_from_proto(&tm, tv_sec_hi, tv_sec_lo, tv_nsec);
 	subm->presented_time = oring_clock_get_nsec(&d->gfx_clock, &tm);
 	subm->next_nsec = refresh;
@@ -295,6 +294,9 @@ feedback_handle_discarded(void *data,
 	struct submission *subm = data;
 
 	assert(feedback == subm->feedback);
+
+	wp_presentation_feedback_destroy(subm->feedback);
+	subm->feedback = NULL;
 
 	fprintf(stderr, "Warning: frame discarded unexpectedly.\n");
 
@@ -352,9 +354,18 @@ submission_create(struct window *window, uint64_t target_time)
 						subm);
 	}
 
-	wl_list_insert(&window->submissions_list, &subm->link);
-
 	return subm;
+}
+
+void
+window_add_submission(struct window *window, struct submission *subm)
+{
+	if (window->prev_sub)
+		submission_destroy(window->prev_sub);
+
+	window->prev_sub = window->cur_sub;
+
+	window->cur_sub = subm;
 }
 
 void
@@ -528,7 +539,6 @@ window_create(struct display *display, const struct geometry *size,
 	window->fullscreen = fullscreen;
 	window->target_time = INVALID_TIME;
 
-	wl_list_init(&window->submissions_list);
 	wl_list_init(&window->on_output_list);
 
 	window->surface = wl_compositor_create_surface(display->compositor);
@@ -565,14 +575,16 @@ window_from_wl_surface(struct wl_surface *surface)
 static void
 window_destroy(struct window *window)
 {
-	struct submission *subm, *tmp;
 	struct window_output *wino, *winotmp;
 
 	wl_shell_surface_destroy(window->shsurf);
 	wl_surface_destroy(window->surface);
 
-	wl_list_for_each_safe(subm, tmp, &window->submissions_list, link)
-		submission_destroy(subm);
+	if (window->prev_sub)
+		submission_destroy(window->prev_sub);
+
+	if (window->cur_sub)
+		submission_destroy(window->cur_sub);
 
 	wl_list_for_each_safe(wino, winotmp, &window->on_output_list, link)
 		window_output_destroy(wino);

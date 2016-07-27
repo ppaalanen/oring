@@ -390,6 +390,7 @@ redraw(struct window *window, uint64_t target_time)
 	}
 
 	subm = submission_create(window, target_time);
+	window_add_submission(window, subm);
 	eglSwapBuffers(rw->render_display->dpy, rw->egl_surface);
 	submission_set_commit_time(subm);
 	window->frames++;

@@ -46,7 +46,6 @@ struct renderer_window;
 struct renderer_state;
 
 struct submission {
-	struct wl_list link;
 	struct window *window;
 
 	uint64_t commit_time;
@@ -112,11 +111,12 @@ struct window {
 	struct wl_shell_surface *shsurf;
 
 	uint64_t target_time;
+	struct submission *prev_sub;
+	struct submission *cur_sub;
 
 	bool fullscreen;
 	bool opaque;
 
-	struct wl_list submissions_list; /* struct submission::link */
 	struct wl_list on_output_list; /* struct window_output::link */
 };
 
@@ -127,6 +127,9 @@ struct window_output {
 
 struct window *
 window_from_wl_surface(struct wl_surface *surface);
+
+void
+window_add_submission(struct window *window, struct submission *subm);
 
 struct submission *
 submission_create(struct window *window, uint64_t target_time);
