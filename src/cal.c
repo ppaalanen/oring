@@ -57,6 +57,23 @@
 
 int running = 1;
 
+static double
+format_nsec(double nsec, const char **unit)
+{
+	const char *units[] = { "ns", "us", "ms", "s" };
+	unsigned i = 0;
+	double ret = fabs(nsec);
+
+	while (ret > 2000.0 && i < ARRAY_LENGTH(units) - 1) {
+		ret /= 1000.0;
+		i++;
+	}
+
+	*unit = units[i];
+
+	return copysign(ret, nsec);
+}
+
 /** Get one of the outputs the window is on
  *
  * \param window A window to identify the wl_surface.
@@ -156,15 +173,20 @@ submission_finish(struct submission *subm)
 	uint32_t output_name = 9999;
 	double dt;
 	uint64_t target_time;
+	double dt_val;
+	const char *dt_unit;
+	double pres;
+	const char *pres_unit;
 
 	if (subm->sync_output)
 		output_name = subm->sync_output->name;
 
 	if (subm->presented_time != INVALID_TIME) {
 		dt = time_subtract(subm->presented_time, subm->target_time);
-		printf("presented at %.3f ms on output-%d, %.1f ms from target\n",
-		       (double)subm->presented_time * 1e-6,
-		       output_name, dt * 1e-6);
+		dt_val = format_nsec(dt, &dt_unit);
+		pres = format_nsec(subm->presented_time, &pres_unit);
+		printf("presented at %.3f %s on output-%d, %.1f %s from target\n",
+		       pres, pres_unit, output_name, dt_val, dt_unit);
 
 		target_time = predict_next_frame_time_by_presented(subm);
 	} else {
